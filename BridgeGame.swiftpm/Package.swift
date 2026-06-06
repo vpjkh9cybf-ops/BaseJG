@@ -1,13 +1,15 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 5.5
 import PackageDescription
 
 let package = Package(
     name: "BridgeGame",
-    platforms: [.iOS("16.0")],
+    platforms: [
+        .iOS("15.2")
+    ],
     targets: [
         .executableTarget(
             name: "BridgeGame",
-            path: "Sources/BridgeGame"
+            path: "."
         )
     ]
 )
