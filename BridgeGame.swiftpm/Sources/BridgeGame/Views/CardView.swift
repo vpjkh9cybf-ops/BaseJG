@@ -71,14 +71,3 @@ struct FaceDownCardView: View {
             .frame(width: width, height: height)
     }
 }
-
-#Preview {
-    HStack(spacing: 4) {
-        CardView(card: Card(suit: .spades, rank: .ace))
-        CardView(card: Card(suit: .hearts, rank: .king), isHighlighted: true)
-        CardView(card: Card(suit: .diamonds, rank: .queen), isSmall: true)
-        FaceDownCardView()
-        FaceDownCardView(isSmall: true)
-    }
-    .padding()
-}
