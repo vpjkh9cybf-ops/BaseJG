@@ -5,19 +5,21 @@ struct CardView: View {
     let card: Card
     var isHighlighted: Bool = false
     var isSmall: Bool = false
+    var isMedium: Bool = false
 
-    private var width:  CGFloat { isSmall ? 34  : 52  }
-    private var height: CGFloat { isSmall ? 50  : 76  }
-    private var font:   Font    { isSmall ? .caption : .callout }
-    private var topFont: Font   { isSmall ? .system(size: 8) : .caption2 }
+    private var width:   CGFloat { isSmall ? 34 : (isMedium ? 44 : 66) }
+    private var height:  CGFloat { isSmall ? 50 : (isMedium ? 62 : 96) }
+    private var radius:  CGFloat { isSmall ? 4  : (isMedium ? 5  : 6 ) }
+    private var font:    Font    { isSmall ? .caption : (isMedium ? .footnote : .body) }
+    private var topFont: Font    { isSmall ? .system(size: 8) : (isMedium ? .system(size: 10) : .caption) }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: isSmall ? 4 : 6)
+            RoundedRectangle(cornerRadius: radius)
                 .fill(Color(.systemBackground))
                 .shadow(color: .black.opacity(0.25), radius: 2, x: 1, y: 1)
                 .overlay(
-                    RoundedRectangle(cornerRadius: isSmall ? 4 : 6)
+                    RoundedRectangle(cornerRadius: radius)
                         .stroke(isHighlighted ? Color.yellow : Color.gray.opacity(0.4), lineWidth: isHighlighted ? 2 : 0.5)
                 )
 
@@ -39,7 +41,7 @@ struct CardView: View {
                 Spacer()
 
                 Text(card.suit.symbol)
-                    .font(isSmall ? .body : .title3)
+                    .font(isSmall ? .body : (isMedium ? .title3 : .title2))
                     .foregroundColor(card.suit.color)
 
                 Spacer()
@@ -52,8 +54,8 @@ struct CardView: View {
 struct FaceDownCardView: View {
     var isSmall: Bool = false
 
-    private var width:  CGFloat { isSmall ? 34 : 52 }
-    private var height: CGFloat { isSmall ? 50 : 76 }
+    private var width:  CGFloat { isSmall ? 34 : 66 }
+    private var height: CGFloat { isSmall ? 50 : 96 }
 
     var body: some View {
         RoundedRectangle(cornerRadius: isSmall ? 4 : 6)

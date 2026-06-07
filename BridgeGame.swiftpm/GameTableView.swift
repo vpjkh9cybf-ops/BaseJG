@@ -168,10 +168,10 @@ struct GameTableView: View {
                 .foregroundColor(.white.opacity(0.90))
 
             if game.phase == .playing {
-                HandView(cards: southCards, faceDown: false, isSmall: false,
+                HandView(cards: southCards, faceDown: false, isSmall: false, isWide: true,
                          legalCards: legal, onTap: tap)
             } else {
-                HandView(cards: southCards, faceDown: false, isSmall: false)
+                HandView(cards: southCards, faceDown: false, isSmall: false, isWide: true)
             }
 
             if game.phase == .bidding && game.isHumanTurn {

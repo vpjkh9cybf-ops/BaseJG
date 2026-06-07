@@ -33,17 +33,17 @@ struct TrickAreaView: View {
                     .font(.caption)
             }
         }
-        .frame(width: 160, height: 160)
+        .frame(width: 190, height: 240)
     }
 
     @ViewBuilder
     private func trickCard(for seat: Seat, in trick: Trick) -> some View {
         if let card = trick.card(for: seat) {
-            CardView(card: card, isSmall: true)
+            CardView(card: card, isMedium: true)
         } else {
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: 5)
                 .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                .frame(width: 34, height: 50)
+                .frame(width: 44, height: 62)
         }
     }
 }

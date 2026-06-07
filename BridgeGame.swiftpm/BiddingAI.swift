@@ -463,6 +463,17 @@ struct BiddingAI {
         let hcp = eval.hcp
         let openSuit = openStrain.suit!
 
+        // ── Support Double ──────────────────────────────────────────────────
+        // I opened 1M, partner bid a new suit at 1-level, RHO overcalled.
+        // Double shows EXACTLY 3-card support for partner's suit (raise would show 4+).
+        if ctx.opponentIntervened,
+           respLevel == .one,
+           respStrain != openStrain,
+           let respSuit = respStrain.suit,
+           eval.length(respSuit) == 3 {
+            return .double
+        }
+
         // Partner bid Jacoby 2NT (4+ fit, game force)
         if respLevel == .two && respStrain == .notrump {
             // Show short suit (singleton/void) with extras, or NT/4M minimum
@@ -634,44 +645,62 @@ struct BiddingAI {
             return openingBid(eval: eval, hand: hand, vulnerability: .neither)
         }
 
-        // Takeout double (13+ HCP, shortage in opponent's suit, 3 other suits)
-        if ctx.myBids.isEmpty {
-            if let oppSuit = highest.strain?.suit, eval.length(oppSuit) <= 2 && hcp >= 12 {
-                return .double
+        // ── Negative Double ───────────────────────────────────────────────────
+        // Partner opened a suit at 1-level, RHO overcalled a suit, I haven't bid.
+        // Shows 4+ cards in unbid major(s), 6+ HCP.
+        if ctx.myBids.isEmpty,
+           let partnerOpen = ctx.partnerLastContractBid,
+           partnerOpen.level == .one,
+           let partnerOpenStrain = partnerOpen.strain,
+           partnerOpenStrain != .notrump,
+           let partnerOpenSuit = partnerOpenStrain.suit,
+           let rhoLastBid = ctx.rightOpponentBids.last?.bid,
+           rhoLastBid.isSuitBid,
+           let rhoBidSuit = rhoLastBid.strain?.suit,
+           hcp >= 6 {
+            let hasUnbidMajor = [Suit.hearts, .spades].contains { suit in
+                suit != partnerOpenSuit && suit != rhoBidSuit && eval.length(suit) >= 4
             }
+            if hasUnbidMajor { return .double }
         }
 
-        // Simple overcall with good 5-card suit
+        // ── Takeout Double ────────────────────────────────────────────────────
+        // First bid, partner hasn't bid, opponent opened/overcalled a suit.
+        // Requires shortage in their suit and 3-card+ support for other three suits.
+        if ctx.myBids.isEmpty,
+           ctx.partnerBids.allSatisfy({ $0.bid == .pass }),
+           let oppSuit = highest.strain?.suit,
+           hcp >= 12 {
+            let otherSuits = Suit.allCases.filter { $0 != oppSuit }
+            let supportCount = otherSuits.filter { eval.length($0) >= 3 }.count
+            let hasSingleton = eval.length(oppSuit) <= 1
+            let hasDoubleton = eval.length(oppSuit) <= 2
+            // Classic takeout: void/singleton + 3+ in all other suits
+            if hasSingleton && supportCount == 3 { return .double }
+            // Acceptable: doubleton + 3+ in all other suits + 13+ HCP
+            if hasDoubleton && supportCount == 3 && hcp >= 13 { return .double }
+            // Strong hand: 16+ HCP, can double with slightly imperfect shape
+            if hasDoubleton && supportCount >= 2 && hcp >= 16 { return .double }
+        }
+
+        // ── Simple Overcall ───────────────────────────────────────────────────
         if ctx.myBids.isEmpty && hcp >= 8 {
             for suit in [Suit.spades, .hearts, .diamonds, .clubs] {
                 if eval.length(suit) >= 5 {
-                    let overcallBid = Bid.contract(.one, suit.strain)
-                    if overcallBid.isHigherThan(highest) {
-                        return overcallBid
-                    }
+                    let overcall1 = Bid.contract(.one, suit.strain)
+                    if overcall1.isHigherThan(highest) { return overcall1 }
                     let overcall2 = Bid.contract(.two, suit.strain)
-                    if hcp >= 11 && overcall2.isHigherThan(highest) {
-                        return overcall2
-                    }
+                    if hcp >= 11 && overcall2.isHigherThan(highest) { return overcall2 }
                 }
             }
         }
 
-        // Negative double (partner opened, opponent overcalled)
-        if let partnerOpen = ctx.partnerLastContractBid,
-           let oppOvercall = (ctx.leftOpponentBids + ctx.rightOpponentBids).last?.bid,
-           ctx.myBids.isEmpty && hcp >= 7 {
-            return .double
-        }
-
-        // Competitive raise of partner's suit
+        // ── Competitive Raise of Partner's Suit ───────────────────────────────
         if let partnerSuit = ctx.partnerLastContractBid?.strain {
             let fit = eval.length(partnerSuit.suit ?? .clubs)
             if fit >= 3 && hcp >= 6 {
                 let raiseBid = Bid.contract(.three, partnerSuit)
-                if raiseBid.isHigherThan(highest) {
-                    return raiseBid
-                }
+                if raiseBid.isHigherThan(highest) { return raiseBid }
             }
         }
 
