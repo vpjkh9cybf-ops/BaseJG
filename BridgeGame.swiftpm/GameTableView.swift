@@ -40,11 +40,14 @@ struct TableOverlayView: View {
     @EnvironmentObject var game: GameState
 
     var body: some View {
-        if case .handResult(let made, let tricks, let score) = game.phase {
-            HandResultView(made: made, tricks: tricks, score: score)
-        }
-        if game.phase == .rubberComplete {
-            RubberCompleteView()
+        Group {
+            if case .handResult(let made, let tricks, let score) = game.phase {
+                HandResultView(made: made, tricks: tricks, score: score)
+            } else if game.phase == .rubberComplete {
+                RubberCompleteView()
+            } else {
+                EmptyView()
+            }
         }
     }
 }
