@@ -43,7 +43,7 @@ struct BiddingBoxView: View {
             Text(label)
                 .font(.callout.bold())
                 .foregroundColor(enabled ? .white : .secondary)
-                .frame(minWidth: 68, height: 42)
+                .frame(minWidth: 68, minHeight: 42)
                 .padding(.horizontal, 8)
                 .background(enabled ? color : Color(.systemFill))
                 .cornerRadius(8)
