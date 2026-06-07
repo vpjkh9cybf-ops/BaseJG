@@ -3,6 +3,7 @@ import SwiftUI
 
 struct GameTableView: View {
     @EnvironmentObject var game: GameState
+    @State private var showAuction: Bool = false
 
     // During bidding give the south area more room to fit the full bid grid.
     private var isBiddingPhase: Bool { game.phase == .bidding }
@@ -15,19 +16,22 @@ struct GameTableView: View {
 
                 VStack(spacing: 0) {
                     northArea
-                        .frame(height: geo.size.height * (isBiddingPhase ? 0.13 : 0.22))
+                        .frame(height: geo.size.height * (isBiddingPhase ? 0.10 : 0.16))
 
                     HStack(alignment: .center, spacing: 0) {
                         westArea.frame(width: geo.size.width * 0.18)
                         centerArea.frame(maxWidth: .infinity)
                         eastArea.frame(width: geo.size.width * 0.18)
                     }
-                    .frame(height: geo.size.height * (isBiddingPhase ? 0.27 : 0.40))
+                    .frame(height: geo.size.height * (isBiddingPhase ? 0.24 : 0.55))
 
                     southArea
-                        .frame(height: geo.size.height * (isBiddingPhase ? 0.60 : 0.30))
+                        .frame(height: geo.size.height * (isBiddingPhase ? 0.66 : 0.29))
                 }
                 .animation(.easeInOut(duration: 0.2), value: isBiddingPhase)
+                .onChange(of: isBiddingPhase) { newVal in
+                    if newVal { showAuction = false }
+                }
 
                 overlayLayer
             }
@@ -91,8 +95,14 @@ struct GameTableView: View {
 
     private var centerArea: some View {
         return HStack(spacing: 10) {
-            ScorePadView()
-                .frame(maxHeight: 200)
+            // Left column: score pad + tappable contract summary during play
+            VStack(spacing: 4) {
+                ScorePadView()
+                    .frame(maxHeight: 200)
+                if !isBiddingPhase, let c = game.contract {
+                    contractButton(c)
+                }
+            }
 
             VStack(spacing: 8) {
                 centerContent
@@ -104,7 +114,8 @@ struct GameTableView: View {
                 }
             }
 
-            if !game.auction.isEmpty {
+            // Auction history: always during bidding, only when toggled during play
+            if !game.auction.isEmpty && (isBiddingPhase || showAuction) {
                 AuctionView(
                     auction: game.auction,
                     dealer: game.dealer,
@@ -114,6 +125,30 @@ struct GameTableView: View {
             }
         }
         .padding(.horizontal, 8)
+    }
+
+    private func contractButton(_ c: Contract) -> some View {
+        Button { showAuction.toggle() } label: {
+            VStack(spacing: 2) {
+                Text(c.display)
+                    .font(.callout.bold())
+                    .foregroundColor(.primary)
+                Text("by \(c.declarer.name)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(showAuction ? "▲ Hide" : "▼ Auction")
+                    .font(.caption2)
+                    .foregroundColor(.blue)
+            }
+            .padding(6)
+            .frame(maxWidth: 140)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
+            )
+        }
     }
 
     @ViewBuilder

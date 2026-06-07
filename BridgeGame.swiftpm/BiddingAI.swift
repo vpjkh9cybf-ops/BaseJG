@@ -257,7 +257,6 @@ struct BiddingAI {
         let tp  = eval.totalPoints
         guard let openSuit = openStrain.suit else { return .pass }
         let fit = eval.length(openSuit)
-        let otherMajor: Strain = openStrain == .spades ? .hearts : .spades
 
         if hcp < 6 { return .pass }
 
@@ -266,12 +265,24 @@ struct BiddingAI {
             return .contract(.two, .notrump)
         }
 
-        // Limit raise / game raise
-        if fit >= 3 && tp >= 10 && tp <= 11 {
-            return .contract(.three, openStrain)  // Limit raise (invitational)
+        // Splinter: 4+ fit, 10-13 HCP, singleton or void in a side suit
+        if fit >= 4 && hcp >= 10 && hcp <= 13 {
+            let side = Suit.allCases.filter { $0 != openSuit }.sorted { eval.length($0) < eval.length($1) }
+            if let short = side.first, eval.length(short) <= 1,
+               let spl = splinterBid(openSuit: openSuit, singletonSuit: short) {
+                return spl
+            }
         }
+
+        // Reverse Drury: 2♣ shows limit raise (3+ fit, 10-11 total points)
+        // Opener rebids 2♦ = minimum (responder signs off in 2M) or 2M = sound opening
+        if fit >= 3 && tp >= 10 && tp <= 11 {
+            return .contract(.two, .clubs)
+        }
+
+        // Game raise
         if fit >= 3 && tp >= 12 {
-            return .contract(.four, openStrain)   // Game raise
+            return .contract(.four, openStrain)
         }
 
         // Simple raise
@@ -500,6 +511,14 @@ struct BiddingAI {
             return .pass
         }
 
+        // Reverse Drury: partner's 2♣ shows limit raise (3+ fit, 10-11 pts)
+        // 2♦ = minimum opener (responder signs off in 2M); 2M/4M = sound opener
+        if respLevel == .two && respStrain == .clubs {
+            if hcp >= 16 { return .contract(.four, openStrain) }
+            if hcp >= 14 { return .contract(.two, openStrain)  }
+            return .contract(.two, .diamonds)
+        }
+
         // Partner bid new suit at 2-level (game force)
         if respLevel == .two {
             if eval.length(respStrain.suit ?? .clubs) >= 4 {
@@ -576,14 +595,32 @@ struct BiddingAI {
         guard let partnerRebidBid = ctx.partnerLastContractBid else { return .pass }
         guard let myResp = ctx.myLastContractBid else { return .pass }
 
-        // After Stayman sequence
+        // After 2♣: distinguish Reverse Drury (after 1M) from Stayman (after 1NT)
         if myResp == .contract(.two, .clubs) {
-            // Partner showed 2♥ or 2♠ (4-card major)
+            let partnerFirstBid = ctx.partnerBids.first?.bid
+            let isDrury = partnerFirstBid?.strain?.isMajor == true && partnerFirstBid?.level == .one
+
+            if isDrury {
+                guard let level = partnerRebidBid.level,
+                      let strain = partnerRebidBid.strain else { return .pass }
+                if level == .two && strain == .diamonds {
+                    // Opener signalled minimum → sign off in 2M
+                    guard let openMajor = partnerFirstBid?.strain else { return .pass }
+                    return .contract(.two, openMajor)
+                }
+                if level == .two && strain.isMajor {
+                    // Opener showed sound opening → raise to game
+                    return .contract(.four, strain)
+                }
+                return .pass
+            }
+
+            // Stayman: partner showed a 4-card major (2♥ or 2♠)
             if let level = partnerRebidBid.level, let strain = partnerRebidBid.strain,
                level == .two && strain.isMajor {
                 let fit = eval.length(strain.suit!)
-                if fit >= 4 && hcp >= 8  { return .contract(.four, strain) } // Game
-                if fit >= 4 && hcp >= 6  { return .contract(.three, strain) } // Invite
+                if fit >= 4 && hcp >= 8  { return .contract(.four, strain) }
+                if fit >= 4 && hcp >= 6  { return .contract(.three, strain) }
                 if hcp >= 10 { return .contract(.three, .notrump) }
                 if hcp >= 8  { return .contract(.two, .notrump) }
                 return .pass
@@ -719,6 +756,20 @@ struct BiddingAI {
             }
         }
         return .pass
+    }
+
+    // MARK: - Splinter Helper
+
+    private static func splinterBid(openSuit: Suit, singletonSuit: Suit) -> Bid? {
+        switch (openSuit, singletonSuit) {
+        case (.hearts, .spades):   return .contract(.three, .spades)
+        case (.hearts, .clubs):    return .contract(.four, .clubs)
+        case (.hearts, .diamonds): return .contract(.four, .diamonds)
+        case (.spades, .hearts):   return .contract(.four, .hearts)
+        case (.spades, .clubs):    return .contract(.four, .clubs)
+        case (.spades, .diamonds): return .contract(.four, .diamonds)
+        default: return nil
+        }
     }
 
     private static func highestSafeBid(eval: HandEvaluation, above: Bid?) -> Bid {

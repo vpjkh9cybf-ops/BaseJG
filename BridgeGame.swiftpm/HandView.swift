@@ -25,7 +25,7 @@ struct HandView: View {
             GeometryReader { geo in
                 faceUpLayoutWide(in: geo)
             }
-            .frame(height: 96)
+            .frame(height: 112)
         } else {
             faceUpLayout
         }
@@ -41,11 +41,13 @@ struct HandView: View {
         .frame(height: isSmall ? 50 : 96)
     }
 
-    // Face-up wide: all cards in one row filling available width
+    // Face-up wide: all cards in one touching row sorted spades→clubs
     private func faceUpLayoutWide(in geo: GeometryProxy) -> some View {
-        let cardW: CGFloat = 66
+        let cardW: CGFloat = 86
         let n = cards.count
-        let step: CGFloat = n > 1 ? (geo.size.width - cardW) / CGFloat(n - 1) : 0
+        // step ≤ cardW so cards always touch (never gap); fill available width
+        let fillStep: CGFloat = n > 1 ? (geo.size.width - cardW) / CGFloat(n - 1) : 0
+        let step: CGFloat = min(cardW, fillStep)
         let sorted = cards.sorted { a, b in
             let order: [Suit] = [.spades, .hearts, .diamonds, .clubs]
             let ai = order.firstIndex(of: a.suit) ?? 0
@@ -60,18 +62,18 @@ struct HandView: View {
                     Button {
                         onTap?(card)
                     } label: {
-                        CardView(card: card, isHighlighted: isLegal, isSmall: false)
+                        CardView(card: card, isHighlighted: isLegal, wideHand: true)
                     }
                     .disabled(!isLegal)
                     .opacity(isLegal || legalCards.isEmpty ? 1.0 : 0.55)
                     .offset(x: CGFloat(idx) * step)
                 } else {
-                    CardView(card: card, isSmall: false)
+                    CardView(card: card, wideHand: true)
                         .offset(x: CGFloat(idx) * step)
                 }
             }
         }
-        .frame(width: geo.size.width, height: 96, alignment: .leading)
+        .frame(width: geo.size.width, height: 112, alignment: .leading)
     }
 
     // Face-up: show suits in rows

@@ -6,11 +6,11 @@ struct CardView: View {
     var isHighlighted: Bool = false
     var isSmall: Bool = false
     var isMedium: Bool = false
+    var wideHand: Bool = false      // single-row south hand: bigger, no corner suit
 
-    private var width:   CGFloat { isSmall ? 34 : (isMedium ? 44 : 66) }
-    private var height:  CGFloat { isSmall ? 50 : (isMedium ? 62 : 96) }
+    private var width:   CGFloat { isSmall ? 34 : (isMedium ? 44 : (wideHand ? 86 : 66)) }
+    private var height:  CGFloat { isSmall ? 50 : (isMedium ? 62 : (wideHand ? 112 : 96)) }
     private var radius:  CGFloat { isSmall ? 4  : (isMedium ? 5  : 6 ) }
-    private var font:    Font    { isSmall ? .caption : (isMedium ? .footnote : .body) }
     private var topFont: Font    { isSmall ? .system(size: 8) : (isMedium ? .system(size: 10) : .caption) }
 
     var body: some View {
@@ -27,11 +27,13 @@ struct CardView: View {
                 HStack {
                     VStack(spacing: 0) {
                         Text(card.rank.display)
-                            .font(topFont)
+                            .font(wideHand ? .footnote.bold() : topFont)
                             .foregroundColor(card.suit.color)
-                        Text(card.suit.symbol)
-                            .font(topFont)
-                            .foregroundColor(card.suit.color)
+                        if !wideHand {
+                            Text(card.suit.symbol)
+                                .font(topFont)
+                                .foregroundColor(card.suit.color)
+                        }
                     }
                     Spacer()
                 }
@@ -41,7 +43,7 @@ struct CardView: View {
                 Spacer()
 
                 Text(card.suit.symbol)
-                    .font(isSmall ? .body : (isMedium ? .title3 : .title2))
+                    .font(isSmall ? .body : (isMedium ? .title3 : (wideHand ? .largeTitle : .title2)))
                     .foregroundColor(card.suit.color)
 
                 Spacer()
