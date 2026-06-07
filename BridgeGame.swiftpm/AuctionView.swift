@@ -67,7 +67,6 @@ struct AuctionView: View {
         )
     }
 
-    @ViewBuilder
     private func bidCell(_ bid: Bid) -> some View {
         let text: String
         let color: Color
@@ -87,7 +86,7 @@ struct AuctionView: View {
             color = strain.color
         }
 
-        Text(text)
+        return Text(text)
             .font(.caption)
             .foregroundColor(color)
             .frame(maxWidth: .infinity)

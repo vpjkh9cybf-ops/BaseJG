@@ -5,7 +5,7 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if case .menu = game.phase {
+            if game.phase == .menu {
                 MenuView()
             } else {
                 GameTableView()
