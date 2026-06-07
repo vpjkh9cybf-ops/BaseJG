@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 enum GamePhase: Equatable {
     case menu
@@ -15,10 +14,9 @@ struct AuctionEntry: Identifiable {
     let bid: Bid
 }
 
-@MainActor
 class GameState: ObservableObject {
 
-    // MARK: - State
+    // MARK: - Published State
 
     @Published var phase: GamePhase = .menu
     @Published var hands: [Seat: [Card]] = [:]
@@ -34,6 +32,8 @@ class GameState: ObservableObject {
     @Published var rubberScore = RubberScore()
     @Published var statusMessage: String = ""
     @Published var aiThinking: Bool = false
+
+    let humanSeat: Seat = .south
 
     // MARK: - Computed
 
@@ -61,7 +61,7 @@ class GameState: ObservableObject {
         guard auction.count >= 4 else { return false }
         let last4 = auction.suffix(4).map { $0.bid }
         if last4.allSatisfy({ $0 == .pass }) { return true }
-        if auction.count >= 4, lastContractBid != nil {
+        if lastContractBid != nil {
             let last3 = auction.suffix(3).map { $0.bid }
             if last3.allSatisfy({ $0 == .pass }) { return true }
         }
@@ -70,8 +70,8 @@ class GameState: ObservableObject {
 
     var legalBids: [Bid] {
         var bids: [Bid] = [.pass]
-        if canDouble    { bids.append(.double) }
-        if canRedouble  { bids.append(.redouble) }
+        if canDouble   { bids.append(.double)   }
+        if canRedouble { bids.append(.redouble) }
         for level in BidLevel.allCases {
             for strain in Strain.allCases {
                 let b = Bid.contract(level, strain)
@@ -96,30 +96,26 @@ class GameState: ObservableObject {
         return last.seat.isNorthSouth == currentBidder.isNorthSouth
     }
 
-    var humanSeat: Seat { .south }
-
     var isHumanTurn: Bool {
         switch phase {
         case .bidding:
-            return currentBidder == humanSeat
+            return currentBidder == humanSeat && !aiThinking
         case .playing:
             guard let trick = currentTrick else { return false }
             let cp = trick.currentPlayer
             if let c = contract, c.declarer == humanSeat {
-                return cp == humanSeat || cp == dummy
+                return (cp == humanSeat || cp == dummy) && !aiThinking
             }
-            return cp == humanSeat
+            return cp == humanSeat && !aiThinking
         default:
             return false
         }
     }
 
     var tappableSeat: Seat? {
-        guard case .playing = phase, let trick = currentTrick else { return nil }
+        guard case .playing = phase, !aiThinking, let trick = currentTrick else { return nil }
         let cp = trick.currentPlayer
-        if let c = contract, c.declarer == humanSeat, cp == dummy {
-            return dummy
-        }
+        if let c = contract, c.declarer == humanSeat, cp == dummy { return dummy }
         return cp == humanSeat ? humanSeat : nil
     }
 
@@ -128,7 +124,6 @@ class GameState: ObservableObject {
               let trick = currentTrick,
               let seat = tappableSeat,
               let hand = hands[seat] else { return [] }
-
         if let ledSuit = trick.ledSuit {
             let followers = hand.filter { $0.suit == ledSuit }
             return Set(followers.isEmpty ? hand : followers)
@@ -136,7 +131,7 @@ class GameState: ObservableObject {
         return Set(hand)
     }
 
-    // MARK: - Actions
+    // MARK: - Public Actions (always called on main thread from SwiftUI)
 
     func startNewRubber() {
         rubberScore.reset()
@@ -152,50 +147,36 @@ class GameState: ObservableObject {
         hands[.south] = Array(deck[26..<39]).sorted(by: sortCards)
         hands[.west]  = Array(deck[39..<52]).sorted(by: sortCards)
 
-        auction = []
+        auction         = []
         completedTricks = []
-        currentTrick = nil
-        contract = nil
-        dummy = nil
-        nsTricks = 0
-        ewTricks = 0
-        aiThinking = false
+        currentTrick    = nil
+        contract        = nil
+        dummy           = nil
+        nsTricks        = 0
+        ewTricks        = 0
+        aiThinking      = false
 
         statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
         phase = .bidding
-
         triggerAIIfNeeded()
     }
 
     func placeBid(_ bid: Bid) {
-        guard phase == .bidding, !aiThinking else { return }
-        guard legalBids.contains(bid) else { return }
-
+        guard phase == .bidding, !aiThinking, legalBids.contains(bid) else { return }
         auction.append(AuctionEntry(seat: currentBidder, bid: bid))
-
-        if biddingIsComplete {
-            finalizeBidding()
-        } else {
-            triggerAIIfNeeded()
-        }
+        if biddingIsComplete { finalizeBidding() }
+        else { triggerAIIfNeeded() }
     }
 
     func playCard(_ card: Card, from seat: Seat) {
-        guard case .playing = phase, !aiThinking else { return }
-        guard legalCards.contains(card), tappableSeat == seat else { return }
-
+        guard case .playing = phase, !aiThinking,
+              tappableSeat == seat, legalCards.contains(card) else { return }
         applyCard(card, from: seat)
     }
 
     func acknowledgeResult() {
         guard case .handResult = phase else { return }
-
-        // Advance dealer and vulnerability
         dealer = dealer.next
-
-        // Vulnerability cycles: Neither → NS → EW → Both → Neither per game
-        // (Handled inside RubberScore via currentVulnerability)
-
         if rubberScore.rubberOver {
             phase = .rubberComplete
         } else {
@@ -216,8 +197,7 @@ class GameState: ObservableObject {
             guard currentBidder != humanSeat else { return }
             triggerAIBid()
         case .playing:
-            guard let seat = currentTrick?.currentPlayer else { return }
-            guard seat != tappableSeat else { return }
+            guard tappableSeat == nil else { return }
             triggerAIPlay()
         default:
             break
@@ -225,66 +205,57 @@ class GameState: ObservableObject {
     }
 
     private func triggerAIBid() {
+        guard !aiThinking else { return }
         aiThinking = true
-        Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            let bidder = self.currentBidder
-            guard let hand = self.hands[bidder] else { return }
-            let auctionSnapshot = self.auction.map { (seat: $0.seat, bid: $0.bid) }
-            let bid = BiddingAI.selectBid(
-                hand: hand,
-                seat: bidder,
-                auction: auctionSnapshot,
-                vulnerability: self.vulnerability
-            )
+
+        let bidder   = currentBidder
+        let hand     = hands[bidder] ?? []
+        let snapshot = auction.map { (seat: $0.seat, bid: $0.bid) }
+        let vul      = vulnerability
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self = self else { return }
+            let bid = BiddingAI.selectBid(hand: hand, seat: bidder,
+                                          auction: snapshot, vulnerability: vul)
             self.aiThinking = false
             self.auction.append(AuctionEntry(seat: bidder, bid: bid))
-            if self.biddingIsComplete {
-                self.finalizeBidding()
-            } else {
-                self.triggerAIIfNeeded()
-            }
+            if self.biddingIsComplete { self.finalizeBidding() }
+            else { self.triggerAIIfNeeded() }
         }
     }
 
     private func finalizeBidding() {
-        // Passed out
         if auction.allSatisfy({ $0.bid == .pass }) {
             statusMessage = "Passed out — no hand played"
             dealer = dealer.next
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                self.startNewHand()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.startNewHand()
             }
             return
         }
 
         guard let c = buildContract() else { return }
         contract = c
-        dummy = c.declarer.partner
+        dummy    = c.declarer.partner
         statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.next.name) leads"
 
         phase = .playing
-        let leader = c.declarer.next
-        currentTrick = Trick(leader: leader, plays: [], trump: c.strain.suit)
-
+        currentTrick = Trick(leader: c.declarer.next, plays: [], trump: c.strain.suit)
         triggerAIIfNeeded()
     }
 
     private func buildContract() -> Contract? {
-        guard let (lastBid, lastSeat) = lastContractBid else { return nil }
-        guard let level = lastBid.level, let strain = lastBid.strain else { return nil }
+        guard let (lastBid, lastSeat) = lastContractBid,
+              let level = lastBid.level, let strain = lastBid.strain else { return nil }
 
         let winningSide = lastSeat.isNorthSouth
-        // Declarer: first player on winning side to bid this strain
         var declarerSeat = lastSeat
         for entry in auction {
-            if entry.seat.isNorthSouth == winningSide, entry.bid.strain == strain {
+            if entry.seat.isNorthSouth == winningSide && entry.bid.strain == strain {
                 declarerSeat = entry.seat
                 break
             }
         }
-
         return Contract(level: level, strain: strain, declarer: declarerSeat, doubled: doubleStatus)
     }
 
@@ -294,9 +265,8 @@ class GameState: ObservableObject {
 
         if currentTrick?.isComplete == true {
             let trick = currentTrick!
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                self.processTrickEnd(trick)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.processTrickEnd(trick)
             }
         } else {
             triggerAIIfNeeded()
@@ -305,7 +275,6 @@ class GameState: ObservableObject {
 
     private func processTrickEnd(_ trick: Trick) {
         completedTricks.append(trick)
-
         guard let winner = trick.winner else { return }
         if winner.isNorthSouth { nsTricks += 1 } else { ewTricks += 1 }
 
@@ -314,65 +283,41 @@ class GameState: ObservableObject {
             return
         }
 
-        // New trick led by winner
-        currentTrick = Trick(leader: winner, plays: [], trump: contract?.strain.suit)
+        currentTrick  = Trick(leader: winner, plays: [], trump: contract?.strain.suit)
         statusMessage = "\(winner.name) wins the trick"
-
         triggerAIIfNeeded()
     }
 
     private func finishHand() {
         guard let c = contract else { return }
-        let isNS = c.declarer.isNorthSouth
-        let tricks = isNS ? nsTricks : ewTricks
-        let made = tricks >= c.tricksRequired
-
-        let result = HandResult(
-            contract: c,
-            declarer: c.declarer,
-            tricksWon: tricks,
-            vulnerability: vulnerability
-        )
+        let tricks = c.declarer.isNorthSouth ? nsTricks : ewTricks
+        let result = HandResult(contract: c, declarer: c.declarer,
+                                tricksWon: tricks, vulnerability: vulnerability)
         rubberScore.recordHand(result)
-
-        let net = result.netScore
-        let scoreStr = made
-            ? "+\(net) (\(tricks - c.tricksRequired >= 0 ? "+\(tricks - c.tricksRequired)" : "="))"
-            : "\(net) (\(tricks - c.tricksRequired))"
-
-        phase = .handResult(made: made, tricks: tricks, score: made ? net : -result.netScore)
+        phase = .handResult(made: result.made, tricks: tricks, score: abs(result.netScore))
     }
 
     private func triggerAIPlay() {
+        guard !aiThinking,
+              let trick = currentTrick,
+              let c = contract else { return }
         aiThinking = true
-        Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard let trick = self.currentTrick,
-                  let c = self.contract else { return }
 
-            let cp = trick.currentPlayer
-            // Declarer plays both declarer and dummy's cards
-            let playingSeat: Seat
-            if c.declarer != self.humanSeat && cp == self.dummy {
-                playingSeat = self.dummy!
-            } else {
-                playingSeat = cp
-            }
+        let cp = trick.currentPlayer
+        let playingSeat: Seat = (c.declarer != humanSeat && cp == dummy) ? dummy! : cp
 
-            guard let hand = self.hands[playingSeat] else { return }
-            let isDeclarer = (c.declarer == playingSeat) || (c.declarer != self.humanSeat && playingSeat == self.dummy)
-            let isDummy    = playingSeat == self.dummy
+        let hand          = hands[playingSeat] ?? []
+        let isDec         = c.declarer == playingSeat || (c.declarer != humanSeat && playingSeat == dummy)
+        let isDum         = playingSeat == dummy
+        let trickCopy     = trick
+        let completedCopy = completedTricks
+        let cCopy         = c
 
-            let card = PlayAI.selectCard(
-                hand: hand,
-                trick: trick,
-                contract: c,
-                seat: playingSeat,
-                isDeclarer: isDeclarer,
-                isDummy: isDummy,
-                completedTricks: self.completedTricks
-            )
-
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self = self else { return }
+            let card = PlayAI.selectCard(hand: hand, trick: trickCopy, contract: cCopy,
+                                         seat: playingSeat, isDeclarer: isDec, isDummy: isDum,
+                                         completedTricks: completedCopy)
             self.aiThinking = false
             self.applyCard(card, from: playingSeat)
         }
