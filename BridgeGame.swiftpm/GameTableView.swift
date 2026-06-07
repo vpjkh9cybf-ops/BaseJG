@@ -10,108 +10,87 @@ struct GameTableView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    NorthAreaView()
+                    northArea
                         .frame(height: geo.size.height * 0.22)
 
                     HStack(alignment: .center, spacing: 0) {
-                        SideHandView(seat: .west)
-                            .frame(width: geo.size.width * 0.18)
-                        CenterAreaView()
-                            .frame(maxWidth: .infinity)
-                        SideHandView(seat: .east)
-                            .frame(width: geo.size.width * 0.18)
+                        westArea.frame(width: geo.size.width * 0.18)
+                        centerArea.frame(maxWidth: .infinity)
+                        eastArea.frame(width: geo.size.width * 0.18)
                     }
                     .frame(height: geo.size.height * 0.40)
 
-                    SouthAreaView()
+                    southArea
                         .frame(height: geo.size.height * 0.30)
                 }
 
-                TableOverlayView()
+                overlayLayer
             }
         }
         .ignoresSafeArea(edges: .bottom)
     }
-}
 
-// MARK: - Overlay
+    // MARK: - North hand
 
-struct TableOverlayView: View {
-    @EnvironmentObject var game: GameState
-
-    var body: some View {
-        Group {
-            if case .handResult(let made, let tricks, let score) = game.phase {
-                HandResultView(made: made, tricks: tricks, score: score)
-            } else if game.phase == .rubberComplete {
-                RubberCompleteView()
-            } else {
-                EmptyView()
-            }
-        }
+    private func isNorthFaceUp() -> Bool {
+        return game.dummy == .north && game.phase == .playing
     }
-}
 
-// MARK: - North
+    private var northArea: some View {
+        let northCards: [Card] = game.hands[.north] ?? []
+        let isDummy: Bool = game.dummy == .north
+        let northTappable: Bool = game.tappableSeat == .north
+        let legal: Set<Card> = northTappable ? game.legalCards : []
+        let tap: ((Card) -> Void)? = northTappable
+            ? { (c: Card) in game.playCard(c, from: .north) }
+            : nil
 
-struct NorthAreaView: View {
-    @EnvironmentObject var game: GameState
-
-    private var cards: [Card]    { game.hands[.north] ?? [] }
-    private var isDummy: Bool    { game.dummy == .north }
-    private var isPlaying: Bool  { game.phase == .playing }
-    private var isTappable: Bool { game.tappableSeat == .north }
-
-    var body: some View {
-        VStack(spacing: 4) {
+        return VStack(spacing: 4) {
             Text(isDummy ? "North (Dummy)" : "North")
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.8))
-            if isTappable {
-                HandView(cards: cards, faceDown: false, isSmall: true,
-                         legalCards: game.legalCards,
-                         onTap: { (card: Card) in game.playCard(card, from: .north) })
-            } else if isPlaying && isDummy {
-                HandView(cards: cards, faceDown: false, isSmall: true)
-            } else {
-                HandView(cards: cards, faceDown: true, isSmall: true)
-            }
+            HandView(cards: northCards, faceDown: !isNorthFaceUp(),
+                     isSmall: true, legalCards: legal, onTap: tap)
         }
         .padding(.horizontal, 8)
         .padding(.top, 8)
     }
-}
 
-// MARK: - East / West
+    // MARK: - West hand
 
-struct SideHandView: View {
-    @EnvironmentObject var game: GameState
-    let seat: Seat
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(seat.name)
+    private var westArea: some View {
+        return VStack(spacing: 4) {
+            Text("West")
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.8))
-            HandView(cards: game.hands[seat] ?? [], faceDown: true, isSmall: true)
-                .rotationEffect(.degrees(seat == .west ? 90.0 : -90.0))
+            HandView(cards: game.hands[.west] ?? [], faceDown: true, isSmall: true)
+                .rotationEffect(.degrees(90))
                 .fixedSize()
         }
     }
-}
 
-// MARK: - Center
+    // MARK: - East hand
 
-struct CenterAreaView: View {
-    @EnvironmentObject var game: GameState
+    private var eastArea: some View {
+        return VStack(spacing: 4) {
+            Text("East")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.8))
+            HandView(cards: game.hands[.east] ?? [], faceDown: true, isSmall: true)
+                .rotationEffect(.degrees(-90))
+                .fixedSize()
+        }
+    }
 
-    var body: some View {
-        HStack(spacing: 10) {
+    // MARK: - Center
+
+    private var centerArea: some View {
+        return HStack(spacing: 10) {
             ScorePadView()
                 .frame(maxHeight: 180)
 
             VStack(spacing: 8) {
-                CenterContentView()
+                centerContent
                 if !game.statusMessage.isEmpty {
                     Text(game.statusMessage)
                         .font(.caption2)
@@ -121,75 +100,73 @@ struct CenterAreaView: View {
             }
 
             if !game.auction.isEmpty {
-                AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
-                    .frame(maxWidth: 160, maxHeight: 220)
+                AuctionView(
+                    auction: game.auction,
+                    dealer: game.dealer,
+                    contract: game.contract
+                )
+                .frame(maxWidth: 160, maxHeight: 220)
             }
         }
         .padding(.horizontal, 8)
     }
-}
 
-struct CenterContentView: View {
-    @EnvironmentObject var game: GameState
-
-    var body: some View {
-        Group {
-            if game.phase == .bidding {
-                VStack(spacing: 6) {
-                    Text("Auction")
-                        .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.8))
-                    Text("\(game.currentBidder.name)'s turn")
+    @ViewBuilder
+    private var centerContent: some View {
+        if game.phase == .bidding {
+            VStack(spacing: 6) {
+                Text("Auction")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.8))
+                Text("\(game.currentBidder.name)'s turn")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+                if game.aiThinking {
+                    ProgressView().tint(.white).scaleEffect(0.8)
+                }
+            }
+        } else if game.phase == .playing {
+            TrickAreaView(trick: game.currentTrick, contract: game.contract)
+            ScoreTickerView(
+                nsTricks: game.nsTricks,
+                ewTricks: game.ewTricks,
+                total: 13,
+                contract: game.contract
+            )
+            .background(Color.white.opacity(0.92))
+            .cornerRadius(8)
+            if game.aiThinking {
+                HStack(spacing: 4) {
+                    ProgressView().tint(.white).scaleEffect(0.7)
+                    Text("Thinking…")
                         .font(.caption2)
-                        .foregroundColor(.white.opacity(0.6))
-                    if game.aiThinking {
-                        ProgressView().tint(.white).scaleEffect(0.8)
-                    }
+                        .foregroundColor(.white.opacity(0.7))
                 }
-            } else if game.phase == .playing {
-                VStack(spacing: 8) {
-                    TrickAreaView(trick: game.currentTrick, contract: game.contract)
-                    ScoreTickerView(nsTricks: game.nsTricks, ewTricks: game.ewTricks,
-                                    total: 13, contract: game.contract)
-                        .background(Color.white.opacity(0.92))
-                        .cornerRadius(8)
-                    if game.aiThinking {
-                        HStack(spacing: 4) {
-                            ProgressView().tint(.white).scaleEffect(0.7)
-                            Text("Thinking…")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                    }
-                }
-            } else {
-                EmptyView()
             }
         }
     }
-}
 
-// MARK: - South
+    // MARK: - South hand
 
-struct SouthAreaView: View {
-    @EnvironmentObject var game: GameState
+    private var southArea: some View {
+        let southCards: [Card] = game.hands[.south] ?? []
+        let isDeclarer: Bool = game.contract?.declarer == .south
+        let southTappable: Bool = game.tappableSeat == .south
+        let legal: Set<Card> = southTappable ? game.legalCards : []
+        let tap: ((Card) -> Void)? = southTappable
+            ? { (c: Card) in game.playCard(c, from: .south) }
+            : nil
 
-    private var cards: [Card]    { game.hands[.south] ?? [] }
-    private var isDeclarer: Bool { game.contract?.declarer == .south }
-    private var isTappable: Bool { game.tappableSeat == .south }
-
-    var body: some View {
-        VStack(spacing: 6) {
+        return VStack(spacing: 6) {
             Text(isDeclarer ? "South — Declarer (You)" : "South (You)")
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.85))
 
-            if isTappable {
-                HandView(cards: cards, faceDown: false, isSmall: false,
-                         legalCards: game.legalCards,
-                         onTap: { (card: Card) in game.playCard(card, from: .south) })
+            if game.phase == .playing {
+                HandView(cards: southCards, faceDown: false, isSmall: false,
+                         legalCards: legal, onTap: tap)
             } else {
-                HandView(cards: cards, faceDown: false, isSmall: false)
+                HandView(cards: southCards, faceDown: false, isSmall: false)
             }
 
             if game.phase == .bidding && game.isHumanTurn {
@@ -199,5 +176,23 @@ struct SouthAreaView: View {
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Overlays
+
+    private var handResultData: (made: Bool, tricks: Int, score: Int)? {
+        if case .handResult(let made, let tricks, let score) = game.phase {
+            return (made: made, tricks: tricks, score: score)
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var overlayLayer: some View {
+        if let r = handResultData {
+            HandResultView(made: r.made, tricks: r.tricks, score: r.score)
+        } else if game.phase == .rubberComplete {
+            RubberCompleteView()
+        }
     }
 }
