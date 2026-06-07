@@ -7,33 +7,33 @@ struct ScorePadView: View {
     var body: some View {
         VStack(spacing: 4) {
             Text("Score")
-                .font(.caption.bold())
+                .font(.callout.bold())
                 .padding(.top, 4)
 
             HStack(spacing: 0) {
                 Text("N-S")
-                    .font(.caption2.bold())
+                    .font(.caption.bold())
                     .frame(maxWidth: .infinity)
                 Divider()
                 Text("E-W")
-                    .font(.caption2.bold())
+                    .font(.caption.bold())
                     .frame(maxWidth: .infinity)
             }
-            .frame(height: 20)
+            .frame(height: 22)
 
             Divider()
 
             // Above the line
             HStack(spacing: 0) {
                 Text("\(game.rubberScore.nsAbove)")
-                    .font(.caption2)
+                    .font(.caption)
                     .frame(maxWidth: .infinity)
                 Divider()
                 Text("\(game.rubberScore.ewAbove)")
-                    .font(.caption2)
+                    .font(.caption)
                     .frame(maxWidth: .infinity)
             }
-            .frame(height: 20)
+            .frame(height: 22)
 
             // Games won
             HStack(spacing: 0) {
@@ -47,20 +47,20 @@ struct ScorePadView: View {
             // Below the line
             HStack(spacing: 0) {
                 Text("\(game.rubberScore.nsBelow)")
-                    .font(.caption.bold())
+                    .font(.callout.bold())
                     .frame(maxWidth: .infinity)
                 Divider()
                 Text("\(game.rubberScore.ewBelow)")
-                    .font(.caption.bold())
+                    .font(.callout.bold())
                     .frame(maxWidth: .infinity)
             }
-            .frame(height: 24)
+            .frame(height: 28)
 
             Divider()
 
             // Vulnerability indicator
             Text("Vul: \(game.vulnerability.rawValue)")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.bottom, 4)
         }
@@ -70,7 +70,7 @@ struct ScorePadView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
         )
-        .frame(maxWidth: 120)
+        .frame(maxWidth: 140)
     }
 
     private func gameDotsView(count: Int) -> some View {

@@ -4,6 +4,9 @@ import SwiftUI
 struct GameTableView: View {
     @EnvironmentObject var game: GameState
 
+    // During bidding give the south area more room to fit the full bid grid.
+    private var isBiddingPhase: Bool { game.phase == .bidding }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -12,18 +15,19 @@ struct GameTableView: View {
 
                 VStack(spacing: 0) {
                     northArea
-                        .frame(height: geo.size.height * 0.22)
+                        .frame(height: geo.size.height * (isBiddingPhase ? 0.13 : 0.22))
 
                     HStack(alignment: .center, spacing: 0) {
                         westArea.frame(width: geo.size.width * 0.18)
                         centerArea.frame(maxWidth: .infinity)
                         eastArea.frame(width: geo.size.width * 0.18)
                     }
-                    .frame(height: geo.size.height * 0.40)
+                    .frame(height: geo.size.height * (isBiddingPhase ? 0.27 : 0.40))
 
                     southArea
-                        .frame(height: geo.size.height * 0.30)
+                        .frame(height: geo.size.height * (isBiddingPhase ? 0.60 : 0.30))
                 }
+                .animation(.easeInOut(duration: 0.2), value: isBiddingPhase)
 
                 overlayLayer
             }
@@ -48,8 +52,8 @@ struct GameTableView: View {
 
         return VStack(spacing: 4) {
             Text(isDummy ? "North (Dummy)" : "North")
-                .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.8))
+                .font(.callout.bold())
+                .foregroundColor(.white.opacity(0.85))
             HandView(cards: northCards, faceDown: !isNorthFaceUp(),
                      isSmall: true, legalCards: legal, onTap: tap)
         }
@@ -62,8 +66,8 @@ struct GameTableView: View {
     private var westArea: some View {
         return VStack(spacing: 4) {
             Text("West")
-                .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.8))
+                .font(.callout.bold())
+                .foregroundColor(.white.opacity(0.85))
             HandView(cards: game.hands[.west] ?? [], faceDown: true, isSmall: true)
                 .rotationEffect(.degrees(90))
                 .fixedSize()
@@ -75,8 +79,8 @@ struct GameTableView: View {
     private var eastArea: some View {
         return VStack(spacing: 4) {
             Text("East")
-                .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.8))
+                .font(.callout.bold())
+                .foregroundColor(.white.opacity(0.85))
             HandView(cards: game.hands[.east] ?? [], faceDown: true, isSmall: true)
                 .rotationEffect(.degrees(-90))
                 .fixedSize()
@@ -88,14 +92,14 @@ struct GameTableView: View {
     private var centerArea: some View {
         return HStack(spacing: 10) {
             ScorePadView()
-                .frame(maxHeight: 180)
+                .frame(maxHeight: 200)
 
             VStack(spacing: 8) {
                 centerContent
                 if !game.statusMessage.isEmpty {
                     Text(game.statusMessage)
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.65))
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.70))
                         .multilineTextAlignment(.center)
                 }
             }
@@ -106,7 +110,7 @@ struct GameTableView: View {
                     dealer: game.dealer,
                     contract: game.contract
                 )
-                .frame(maxWidth: 160, maxHeight: 220)
+                .frame(maxWidth: 180, maxHeight: .infinity)
             }
         }
         .padding(.horizontal, 8)
@@ -117,11 +121,11 @@ struct GameTableView: View {
         if game.phase == .bidding {
             VStack(spacing: 6) {
                 Text("Auction")
-                    .font(.caption.bold())
-                    .foregroundColor(.white.opacity(0.8))
+                    .font(.callout.bold())
+                    .foregroundColor(.white.opacity(0.85))
                 Text("\(game.currentBidder.name)'s turn")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.65))
                 if game.aiThinking {
                     ProgressView().tint(.white).scaleEffect(0.8)
                 }
@@ -140,8 +144,8 @@ struct GameTableView: View {
                 HStack(spacing: 4) {
                     ProgressView().tint(.white).scaleEffect(0.7)
                     Text("Thinking…")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.70))
                 }
             }
         }
@@ -160,8 +164,8 @@ struct GameTableView: View {
 
         return VStack(spacing: 6) {
             Text(isDeclarer ? "South — Declarer (You)" : "South (You)")
-                .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.85))
+                .font(.callout.bold())
+                .foregroundColor(.white.opacity(0.90))
 
             if game.phase == .playing {
                 HandView(cards: southCards, faceDown: false, isSmall: false,

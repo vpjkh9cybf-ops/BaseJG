@@ -25,7 +25,7 @@ struct AuctionView: View {
             HStack(spacing: 0) {
                 ForEach(columns, id: \.self) { seat in
                     Text(seat.abbreviation)
-                        .font(.caption.bold())
+                        .font(.callout.bold())
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -56,7 +56,7 @@ struct AuctionView: View {
             if let c = contract {
                 Divider()
                 Text("\(c.display) by \(c.declarer.name)")
-                    .font(.caption.bold())
+                    .font(.callout.bold())
                     .padding(6)
             }
         }
@@ -88,9 +88,9 @@ struct AuctionView: View {
         }
 
         return Text(text)
-            .font(.caption)
+            .font(.callout)
             .foregroundColor(color)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
     }
 }

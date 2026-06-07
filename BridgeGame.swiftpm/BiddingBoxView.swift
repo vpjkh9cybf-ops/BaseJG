@@ -3,115 +3,76 @@ import SwiftUI
 
 struct BiddingBoxView: View {
     @EnvironmentObject var game: GameState
-    @State private var selectedLevel: BidLevel? = nil
 
     private let strains: [Strain] = [.clubs, .diamonds, .hearts, .spades, .notrump]
     private let levels: [BidLevel] = BidLevel.allCases
 
     var body: some View {
         VStack(spacing: 8) {
-            Text("Your Bid")
-                .font(.headline)
-                .padding(.top, 4)
-
-            // Level selector row
-            HStack(spacing: 6) {
-                ForEach(levels, id: \.rawValue) { level in
-                    Button("\(level.rawValue)") {
-                        selectedLevel = level
-                    }
-                    .buttonStyle(LevelButtonStyle(isSelected: selectedLevel == level))
-                }
-            }
-
-            // Strain grid (only shown if level selected)
-            if let lvl = selectedLevel {
-                HStack(spacing: 6) {
-                    ForEach(strains, id: \.rawValue) { strain in
-                        let bid = Bid.contract(lvl, strain)
-                        let legal = game.legalBids.contains(bid)
-                        Button {
-                            game.placeBid(bid)
-                            selectedLevel = nil
-                        } label: {
-                            Text(strain.display)
-                                .foregroundColor(strain.color)
-                                .font(.callout.bold())
-                                .frame(width: 40, height: 36)
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.gray.opacity(0.4), lineWidth: 0.5)
-                                )
-                        }
-                        .disabled(!legal)
-                        .opacity(legal ? 1 : 0.3)
-                    }
-                }
-            }
-
             // Pass / Double / Redouble
             HStack(spacing: 10) {
-                BidActionButton(label: "Pass", color: .green) {
-                    game.placeBid(.pass)
-                    selectedLevel = nil
-                }
+                specialButton("Pass", color: .green, bid: .pass)
+                specialButton("X",    color: .red,   bid: .double)
+                specialButton("XX",   color: .purple, bid: .redouble)
+            }
 
-                if game.legalBids.contains(.double) {
-                    BidActionButton(label: "X", color: .red) {
-                        game.placeBid(.double)
-                        selectedLevel = nil
-                    }
-                }
+            Divider()
 
-                if game.legalBids.contains(.redouble) {
-                    BidActionButton(label: "XX", color: .purple) {
-                        game.placeBid(.redouble)
-                        selectedLevel = nil
+            // 7 levels × 5 strains grid — all bids visible, illegal ones dimmed
+            VStack(spacing: 3) {
+                ForEach(levels, id: \.rawValue) { level in
+                    HStack(spacing: 3) {
+                        ForEach(strains, id: \.rawValue) { strain in
+                            contractCell(level: level, strain: strain)
+                        }
                     }
                 }
             }
         }
         .padding(10)
-        .background(Color(.systemBackground).opacity(0.95))
+        .background(Color(.systemBackground).opacity(0.97))
         .cornerRadius(12)
-        .shadow(radius: 4)
+        .shadow(radius: 6)
     }
-}
 
-struct LevelButtonStyle: ButtonStyle {
-    var isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(width: 34, height: 34)
-            .background(isSelected ? Color.blue : Color(.secondarySystemBackground))
-            .foregroundColor(isSelected ? .white : .primary)
-            .cornerRadius(8)
-            .font(.callout.bold())
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
-            )
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-    }
-}
-
-struct BidActionButton: View {
-    let label: String
-    let color: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
+    private func specialButton(_ label: String, color: Color, bid: Bid) -> some View {
+        let enabled = game.legalBids.contains(bid)
+        return Button {
+            game.placeBid(bid)
+        } label: {
             Text(label)
                 .font(.callout.bold())
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(color)
+                .foregroundColor(enabled ? .white : .secondary)
+                .frame(minWidth: 68, height: 42)
+                .padding(.horizontal, 8)
+                .background(enabled ? color : Color(.systemFill))
                 .cornerRadius(8)
         }
+        .disabled(!enabled)
+    }
+
+    private func contractCell(level: BidLevel, strain: Strain) -> some View {
+        let bid = Bid.contract(level, strain)
+        let legal = game.legalBids.contains(bid)
+        return Button {
+            game.placeBid(bid)
+        } label: {
+            VStack(spacing: 1) {
+                Text("\(level.rawValue)")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(legal ? .primary : Color.primary.opacity(0.18))
+                Text(strain.display)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(legal ? strain.color : Color.secondary.opacity(0.25))
+            }
+            .frame(width: 50, height: 36)
+            .background(legal ? Color(.secondarySystemBackground) : Color.clear)
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(legal ? Color.gray.opacity(0.3) : Color.clear, lineWidth: 0.5)
+            )
+        }
+        .disabled(!legal)
     }
 }

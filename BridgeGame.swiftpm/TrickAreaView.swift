@@ -61,7 +61,7 @@ struct ScoreTickerView: View {
                     .font(.headline)
                     .foregroundColor(.primary)
                 Text("by \(c.declarer.name)")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundColor(.secondary)
 
                 Divider()
@@ -69,14 +69,14 @@ struct ScoreTickerView: View {
                 HStack(spacing: 16) {
                     VStack {
                         Text("NS")
-                            .font(.caption2.bold())
+                            .font(.caption.bold())
                         Text("\(nsTricks)")
                             .font(.title3.bold())
                             .foregroundColor(c.declarer.isNorthSouth ? .green : .primary)
                     }
                     VStack {
                         Text("EW")
-                            .font(.caption2.bold())
+                            .font(.caption.bold())
                         Text("\(ewTricks)")
                             .font(.title3.bold())
                             .foregroundColor(!c.declarer.isNorthSouth ? .green : .primary)
@@ -84,7 +84,7 @@ struct ScoreTickerView: View {
                 }
 
                 Text("Need \(c.tricksRequired)")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundColor(.secondary)
             } else {
                 Text("Bidding…")
