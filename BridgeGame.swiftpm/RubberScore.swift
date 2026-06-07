@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 struct HandResult {
     let contract: Contract

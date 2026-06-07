@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 struct PlayAI {
 
@@ -12,7 +12,7 @@ struct PlayAI {
         isDummy: Bool,
         completedTricks: [Trick]
     ) -> Card {
-        guard !hand.isEmpty else { fatalError("PlayAI: empty hand") }
+        guard !hand.isEmpty else { return hand.first ?? Card(suit: .spades, rank: .two) }
 
         let ledSuit = trick.ledSuit
         let trump = contract.strain.suit

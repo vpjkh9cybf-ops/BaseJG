@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 struct HandEvaluation {
     let hcp: Int

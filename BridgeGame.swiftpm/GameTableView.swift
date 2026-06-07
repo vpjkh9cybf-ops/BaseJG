@@ -6,7 +6,6 @@ struct GameTableView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // Green felt background
                 Color(red: 0.08, green: 0.40, blue: 0.15)
                     .ignoresSafeArea()
 
@@ -15,12 +14,9 @@ struct GameTableView: View {
                         .frame(height: geo.size.height * 0.22)
 
                     HStack(alignment: .center, spacing: 0) {
-                        westArea
-                            .frame(width: geo.size.width * 0.18)
-                        centerArea
-                            .frame(maxWidth: .infinity)
-                        eastArea
-                            .frame(width: geo.size.width * 0.18)
+                        westArea.frame(width: geo.size.width * 0.18)
+                        centerArea.frame(maxWidth: .infinity)
+                        eastArea.frame(width: geo.size.width * 0.18)
                     }
                     .frame(height: geo.size.height * 0.40)
 
@@ -38,25 +34,21 @@ struct GameTableView: View {
 
     private var northArea: some View {
         let northCards = game.hands[.north] ?? []
-        let isDummy = game.dummy == .north
-        let isPlaying: Bool = {
-            if case .playing = game.phase { return true }
-            return false
-        }()
-        let showFaceUp = isDummy && isPlaying
+        let isDummy    = game.dummy == .north
+        var showFaceUp = false
+        if case .playing = game.phase { showFaceUp = isDummy }
+
+        let legal: Set<Card> = (game.tappableSeat == .north) ? game.legalCards : []
+        let tap: ((Card) -> Void)? = (game.tappableSeat == .north)
+            ? { [game] card in game.playCard(card, from: .north) }
+            : nil
 
         return VStack(spacing: 4) {
             Text(isDummy ? "North (Dummy)" : "North")
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.8))
-
-            HandView(
-                cards: northCards,
-                faceDown: !showFaceUp,
-                isSmall: true,
-                legalCards: (game.tappableSeat == .north) ? game.legalCards : [],
-                onTap: (game.tappableSeat == .north) ? { card in game.playCard(card, from: .north) } : nil
-            )
+            HandView(cards: northCards, faceDown: !showFaceUp,
+                     isSmall: true, legalCards: legal, onTap: tap)
         }
         .padding(.horizontal, 8)
         .padding(.top, 8)
@@ -69,8 +61,7 @@ struct GameTableView: View {
             Text("West")
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.8))
-            let westCards = game.hands[.west] ?? []
-            HandView(cards: westCards, faceDown: true, isSmall: true)
+            HandView(cards: game.hands[.west] ?? [], faceDown: true, isSmall: true)
                 .rotationEffect(.degrees(90))
                 .fixedSize()
         }
@@ -83,8 +74,7 @@ struct GameTableView: View {
             Text("East")
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.8))
-            let eastCards = game.hands[.east] ?? []
-            HandView(cards: eastCards, faceDown: true, isSmall: true)
+            HandView(cards: game.hands[.east] ?? [], faceDown: true, isSmall: true)
                 .rotationEffect(.degrees(-90))
                 .fixedSize()
         }
@@ -98,44 +88,12 @@ struct GameTableView: View {
                 .frame(maxHeight: 180)
 
             VStack(spacing: 8) {
-                if case .bidding = game.phase {
-                    VStack(spacing: 6) {
-                        Text("Auction")
-                            .font(.caption.bold())
-                            .foregroundColor(.white.opacity(0.8))
-                        Text("\(game.currentBidder.name)'s turn")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.6))
-                        if game.aiThinking {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(0.8)
-                        }
-                    }
-                } else if case .playing = game.phase {
-                    TrickAreaView(trick: game.currentTrick, contract: game.contract)
-                    ScoreTickerView(
-                        nsTricks: game.nsTricks,
-                        ewTricks: game.ewTricks,
-                        total: 13,
-                        contract: game.contract
-                    )
-                    .background(Color(.systemBackground).opacity(0.92))
-                    .cornerRadius(8)
-                    if game.aiThinking {
-                        HStack(spacing: 4) {
-                            ProgressView().tint(.white).scaleEffect(0.7)
-                            Text("Thinking…").font(.caption2).foregroundColor(.white.opacity(0.7))
-                        }
-                    }
-                }
-
+                centerContent
                 if !game.statusMessage.isEmpty {
                     Text(game.statusMessage)
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.65))
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 4)
                 }
             }
 
@@ -147,11 +105,43 @@ struct GameTableView: View {
         .padding(.horizontal, 8)
     }
 
+    @ViewBuilder
+    private var centerContent: some View {
+        if case .bidding = game.phase {
+            VStack(spacing: 6) {
+                Text("Auction")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.8))
+                Text("\(game.currentBidder.name)'s turn")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+                if game.aiThinking { ProgressView().tint(.white).scaleEffect(0.8) }
+            }
+        } else if case .playing = game.phase {
+            TrickAreaView(trick: game.currentTrick, contract: game.contract)
+            ScoreTickerView(nsTricks: game.nsTricks, ewTricks: game.ewTricks,
+                            total: 13, contract: game.contract)
+                .background(Color.white.opacity(0.92))
+                .cornerRadius(8)
+            if game.aiThinking {
+                HStack(spacing: 4) {
+                    ProgressView().tint(.white).scaleEffect(0.7)
+                    Text("Thinking…").font(.caption2).foregroundColor(.white.opacity(0.7))
+                }
+            }
+        }
+    }
+
     // MARK: - South
 
     private var southArea: some View {
         let southCards = game.hands[.south] ?? []
         let isDeclarer = game.contract?.declarer == .south
+
+        let legal: Set<Card> = (game.tappableSeat == .south) ? game.legalCards : []
+        let tap: ((Card) -> Void)? = (game.tappableSeat == .south)
+            ? { [game] card in game.playCard(card, from: .south) }
+            : nil
 
         return VStack(spacing: 6) {
             Text(isDeclarer ? "South — Declarer (You)" : "South (You)")
@@ -159,19 +149,14 @@ struct GameTableView: View {
                 .foregroundColor(.white.opacity(0.85))
 
             if case .playing = game.phase {
-                HandView(
-                    cards: southCards,
-                    faceDown: false,
-                    isSmall: false,
-                    legalCards: (game.tappableSeat == .south) ? game.legalCards : [],
-                    onTap: (game.tappableSeat == .south) ? { card in game.playCard(card, from: .south) } : nil
-                )
+                HandView(cards: southCards, faceDown: false, isSmall: false,
+                         legalCards: legal, onTap: tap)
             } else {
                 HandView(cards: southCards, faceDown: false, isSmall: false)
             }
 
             if case .bidding = game.phase {
-                if game.isHumanTurn && !game.aiThinking {
+                if game.isHumanTurn {
                     BiddingBoxView()
                         .padding(.horizontal, 4)
                 }
@@ -185,13 +170,10 @@ struct GameTableView: View {
 
     @ViewBuilder
     private var overlayLayer: some View {
-        switch game.phase {
-        case .handResult(let made, let tricks, let score):
+        if case .handResult(let made, let tricks, let score) = game.phase {
             HandResultView(made: made, tricks: tricks, score: score)
-        case .rubberComplete:
+        } else if case .rubberComplete = game.phase {
             RubberCompleteView()
-        default:
-            EmptyView()
         }
     }
 }
