@@ -14,6 +14,7 @@ struct AuctionEntry: Identifiable {
     let bid: Bid
 }
 
+@MainActor
 class GameState: ObservableObject {
 
     // MARK: - Published State
@@ -131,7 +132,7 @@ class GameState: ObservableObject {
         return Set(hand)
     }
 
-    // MARK: - Public Actions (always called on main thread from SwiftUI)
+    // MARK: - Public Actions
 
     func startNewRubber() {
         rubberScore.reset()
@@ -213,8 +214,8 @@ class GameState: ObservableObject {
         let snapshot = auction.map { (seat: $0.seat, bid: $0.bid) }
         let vul      = vulnerability
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-            guard let self = self else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 700_000_000)
             let bid = BiddingAI.selectBid(hand: hand, seat: bidder,
                                           auction: snapshot, vulnerability: vul)
             self.aiThinking = false
@@ -228,8 +229,9 @@ class GameState: ObservableObject {
         if auction.allSatisfy({ $0.bid == .pass }) {
             statusMessage = "Passed out — no hand played"
             dealer = dealer.next
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.startNewHand()
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                self.startNewHand()
             }
             return
         }
@@ -265,8 +267,9 @@ class GameState: ObservableObject {
 
         if currentTrick?.isComplete == true {
             let trick = currentTrick!
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.processTrickEnd(trick)
+            Task {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                self.processTrickEnd(trick)
             }
         } else {
             triggerAIIfNeeded()
@@ -313,8 +316,8 @@ class GameState: ObservableObject {
         let completedCopy = completedTricks
         let cCopy         = c
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            guard let self = self else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
             let card = PlayAI.selectCard(hand: hand, trick: trickCopy, contract: cCopy,
                                          seat: playingSeat, isDeclarer: isDec, isDummy: isDum,
                                          completedTricks: completedCopy)

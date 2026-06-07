@@ -86,6 +86,7 @@ struct HandResult {
     }
 }
 
+@MainActor
 class RubberScore: ObservableObject {
     // Running below-the-line partial scores (reset on game)
     @Published var nsBelow: Int = 0
