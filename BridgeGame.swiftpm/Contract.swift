@@ -1,3 +1,5 @@
+import Foundation
+
 enum Doubled: Int {
     case undoubled = 1
     case doubled   = 2

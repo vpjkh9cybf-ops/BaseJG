@@ -70,7 +70,7 @@ struct NorthAreaView: View {
             if isTappable {
                 HandView(cards: cards, faceDown: false, isSmall: true,
                          legalCards: game.legalCards,
-                         onTap: { card in game.playCard(card, from: .north) })
+                         onTap: { (card: Card) in game.playCard(card, from: .north) })
             } else if isPlaying && isDummy {
                 HandView(cards: cards, faceDown: false, isSmall: true)
             } else {
@@ -94,7 +94,7 @@ struct SideHandView: View {
                 .font(.caption.bold())
                 .foregroundColor(.white.opacity(0.8))
             HandView(cards: game.hands[seat] ?? [], faceDown: true, isSmall: true)
-                .rotationEffect(.degrees(seat == .west ? 90 : -90))
+                .rotationEffect(.degrees(seat == .west ? 90.0 : -90.0))
                 .fixedSize()
         }
     }
@@ -162,6 +162,8 @@ struct CenterContentView: View {
                         }
                     }
                 }
+            } else {
+                EmptyView()
             }
         }
     }
@@ -185,7 +187,7 @@ struct SouthAreaView: View {
             if isTappable {
                 HandView(cards: cards, faceDown: false, isSmall: false,
                          legalCards: game.legalCards,
-                         onTap: { card in game.playCard(card, from: .south) })
+                         onTap: { (card: Card) in game.playCard(card, from: .south) })
             } else {
                 HandView(cards: cards, faceDown: false, isSmall: false)
             }

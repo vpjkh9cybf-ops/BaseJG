@@ -91,12 +91,21 @@ struct HandResultView: View {
     let tricks: Int
     let score: Int
 
+    private func trickSummary(contract: Contract) -> String {
+        let ot = tricks - contract.tricksRequired
+        if made {
+            return ot == 0 ? "Exactly \(tricks) tricks" : "\(tricks) tricks (+\(ot))"
+        } else {
+            return "\(tricks) tricks (down \(-ot))"
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.45).ignoresSafeArea()
 
             VStack(spacing: 16) {
-                Text(made ? "Contract Made! 🎉" : "Down!")
+                Text(made ? "Contract Made!" : "Down!")
                     .font(.title2.bold())
                     .foregroundColor(made ? .green : .red)
 
@@ -107,12 +116,7 @@ struct HandResultView: View {
                     Text("by \(c.declarer.name)")
                         .foregroundColor(.secondary)
 
-                    let overtricks = tricks - c.tricksRequired
-                    if made {
-                        Text(overtricks == 0 ? "Exactly \(tricks) tricks" : "\(tricks) tricks (+\(overtricks))")
-                    } else {
-                        Text("\(tricks) tricks (down \(-overtricks))")
-                    }
+                    Text(trickSummary(contract: c))
                 }
 
                 Text("\(made ? "+" : "")\(made ? score : -score) points")
