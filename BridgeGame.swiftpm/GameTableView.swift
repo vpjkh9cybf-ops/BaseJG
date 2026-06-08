@@ -4,26 +4,32 @@ import SwiftUI
 struct GameTableView: View {
     @EnvironmentObject var game: GameState
     @State private var showAuction: Bool = false
+    @State private var showSettings: Bool = false
 
     private var isBiddingPhase: Bool { game.phase == .bidding }
     // North is face-up dummy in a wide row when south is declarer
     private var isNorthWideDummy: Bool { game.dummy == .north && game.contract?.declarer == .south }
+    private var isNorthWideDeclarer: Bool {
+        game.switchSeatsForDeclarer && game.contract?.declarer == .north && game.phase == .playing
+    }
+    private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer }
     private var trump: Suit? { game.contract?.strain.suit }
 
     // Layout ratios — three named states
     private var northRatio: Double {
         if isBiddingPhase { return 0.10 }
-        return isNorthWideDummy ? 0.20 : 0.16
+        return northIsWide ? 0.22 : 0.16
     }
     private var midRatio: Double {
         if isBiddingPhase { return 0.18 }
-        return isNorthWideDummy ? 0.51 : 0.55
+        return northIsWide ? 0.50 : 0.54
     }
     private var southRatio: Double {
-        isBiddingPhase ? 0.72 : 0.29
+        if isBiddingPhase { return 0.72 }
+        return northIsWide ? 0.28 : 0.30
     }
     private var layoutKey: String {
-        isBiddingPhase ? "bidding" : (isNorthWideDummy ? "northDummy" : "playing")
+        isBiddingPhase ? "bidding" : (northIsWide ? "northWide" : "playing")
     }
 
     private func isBidding(_ seat: Seat) -> Bool {
@@ -59,15 +65,35 @@ struct GameTableView: View {
                 }
 
                 overlayLayer
+
+                // Gear button — top-right corner
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape.fill")
+                                .font(.title3)
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(10)
+                        }
+                    }
+                    Spacer()
+                }
             }
         }
         .ignoresSafeArea(edges: .bottom)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
     }
 
     // MARK: - North hand
 
     private func isNorthFaceUp() -> Bool {
-        return game.dummy == .north && game.phase == .playing
+        guard game.phase == .playing else { return false }
+        if game.dummy == .north { return true }
+        if isNorthWideDeclarer { return true }
+        return false
     }
 
     private var northArea: some View {
@@ -78,13 +104,18 @@ struct GameTableView: View {
         let tap: ((Card) -> Void)? = northTappable
             ? { (c: Card) in game.playCard(c, from: .north) }
             : nil
-        let label = (isBidding(.north) ? "▶ " : "") + (isDummy ? "North (Dummy)" : "North")
+        let label: String = {
+            let prefix = isBidding(.north) ? "▶ " : ""
+            if isDummy { return prefix + "North (Dummy)" }
+            if isNorthWideDeclarer { return prefix + "North — Declarer" }
+            return prefix + "North"
+        }()
 
         return VStack(spacing: 4) {
             Text(label)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.north))
-            if isNorthWideDummy {
+            if northIsWide {
                 // Dummy shows wide like South, sorted trump-first
                 HandView(cards: northCards, faceDown: false, isSmall: false, isWide: true,
                          trumpSuit: trump, legalCards: legal, onTap: tap)

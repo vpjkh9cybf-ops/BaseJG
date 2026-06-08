@@ -36,6 +36,7 @@ class GameState: ObservableObject {
     @Published var aiThinking: Bool = false
 
     let humanSeat: Seat = .south
+    @Published var switchSeatsForDeclarer: Bool = false
 
     // MARK: - Computed
 
@@ -103,10 +104,13 @@ class GameState: ObservableObject {
         case .bidding:
             return currentBidder == humanSeat && !aiThinking
         case .playing:
-            guard let trick = currentTrick else { return false }
+            guard let trick = currentTrick, let c = contract else { return false }
             let cp = trick.currentPlayer
-            if let c = contract, c.declarer == humanSeat {
+            if c.declarer == humanSeat {
                 return (cp == humanSeat || cp == dummy) && !aiThinking
+            }
+            if switchSeatsForDeclarer && c.declarer == humanSeat.partner {
+                return (cp == c.declarer || cp == dummy) && !aiThinking
             }
             return cp == humanSeat && !aiThinking
         default:
@@ -117,7 +121,15 @@ class GameState: ObservableObject {
     var tappableSeat: Seat? {
         guard case .playing = phase, !aiThinking, let trick = currentTrick else { return nil }
         let cp = trick.currentPlayer
-        if let c = contract, c.declarer == humanSeat, cp == dummy { return dummy }
+        guard let c = contract else { return nil }
+        if c.declarer == humanSeat {
+            if cp == humanSeat || cp == dummy { return cp }
+            return nil
+        }
+        if switchSeatsForDeclarer && c.declarer == humanSeat.partner {
+            if cp == c.declarer || cp == dummy { return cp }
+            return nil
+        }
         return cp == humanSeat ? humanSeat : nil
     }
 
