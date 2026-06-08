@@ -216,7 +216,7 @@ class GameState: ObservableObject {
         let vul      = vulnerability
 
         Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             let bid = BiddingAI.selectBid(hand: hand, seat: bidder,
                                           auction: snapshot, vulnerability: vul)
             self.aiThinking = false

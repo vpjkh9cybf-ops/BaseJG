@@ -8,10 +8,10 @@ struct CardView: View {
     var isMedium: Bool = false
     var wideHand: Bool = false      // single-row south hand: bigger, no corner suit
 
-    private var width:   CGFloat { isSmall ? 34 : (isMedium ? 44 : (wideHand ? 86 : 66)) }
-    private var height:  CGFloat { isSmall ? 50 : (isMedium ? 62 : (wideHand ? 112 : 96)) }
+    private var width:   CGFloat { isSmall ? 34 : (isMedium ? 44 : (wideHand ? 86 : 80)) }
+    private var height:  CGFloat { isSmall ? 50 : (isMedium ? 62 : (wideHand ? 112 : 112)) }
     private var radius:  CGFloat { isSmall ? 4  : (isMedium ? 5  : 6 ) }
-    private var topFont: Font    { isSmall ? .system(size: 8) : (isMedium ? .system(size: 10) : .caption) }
+    private var topFont: Font    { isSmall ? .system(size: 8) : (isMedium ? .system(size: 10) : .subheadline) }
 
     var body: some View {
         ZStack {
@@ -31,7 +31,7 @@ struct CardView: View {
                             .foregroundColor(card.suit.color)
                         if !wideHand {
                             Text(card.suit.symbol)
-                                .font(topFont)
+                                .font(isSmall ? topFont : .callout)
                                 .foregroundColor(card.suit.color)
                         }
                     }
@@ -43,7 +43,7 @@ struct CardView: View {
                 Spacer()
 
                 Text(card.suit.symbol)
-                    .font(isSmall ? .body : (isMedium ? .title3 : (wideHand ? .largeTitle : .title2)))
+                    .font(isSmall ? .body : (isMedium ? .title3 : (wideHand ? .largeTitle : .title)))
                     .foregroundColor(card.suit.color)
 
                 Spacer()

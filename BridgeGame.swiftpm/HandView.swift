@@ -6,12 +6,18 @@ struct HandView: View {
     let faceDown: Bool
     let isSmall: Bool
     var isWide: Bool = false
+    var trumpSuit: Suit? = nil
     var legalCards: Set<Card> = []
     var onTap: ((Card) -> Void)? = nil
 
-    // Group cards by suit for display
+    // Group cards by suit, trump first
     private var bySuit: [(Suit, [Card])] {
-        Suit.allCases.reversed().compactMap { suit in
+        var order = Array(Suit.allCases.reversed())  // spades, hearts, diamonds, clubs
+        if let trump = trumpSuit, let i = order.firstIndex(of: trump) {
+            order.remove(at: i)
+            order.insert(trump, at: 0)
+        }
+        return order.compactMap { suit in
             let suitCards = cards.filter { $0.suit == suit }
             guard !suitCards.isEmpty else { return nil }
             return (suit, suitCards.sorted(by: { $0.rank > $1.rank }))
@@ -41,17 +47,21 @@ struct HandView: View {
         .frame(height: isSmall ? 50 : 96)
     }
 
-    // Face-up wide: all cards in one touching row sorted spades→clubs
+    // Face-up wide: all cards in one touching row, trump suit first
     private func faceUpLayoutWide(in geo: GeometryProxy) -> some View {
         let cardW: CGFloat = 86
         let n = cards.count
         // step ≤ cardW so cards always touch (never gap); fill available width
         let fillStep: CGFloat = n > 1 ? (geo.size.width - cardW) / CGFloat(n - 1) : 0
         let step: CGFloat = min(cardW, fillStep)
+        var suitOrder: [Suit] = [.spades, .hearts, .diamonds, .clubs]
+        if let trump = trumpSuit, let i = suitOrder.firstIndex(of: trump) {
+            suitOrder.remove(at: i)
+            suitOrder.insert(trump, at: 0)
+        }
         let sorted = cards.sorted { a, b in
-            let order: [Suit] = [.spades, .hearts, .diamonds, .clubs]
-            let ai = order.firstIndex(of: a.suit) ?? 0
-            let bi = order.firstIndex(of: b.suit) ?? 0
+            let ai = suitOrder.firstIndex(of: a.suit) ?? suitOrder.count
+            let bi = suitOrder.firstIndex(of: b.suit) ?? suitOrder.count
             if ai != bi { return ai < bi }
             return a.rank > b.rank
         }

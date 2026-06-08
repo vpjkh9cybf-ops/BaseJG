@@ -33,7 +33,7 @@ struct TrickAreaView: View {
                     .font(.caption)
             }
         }
-        .frame(width: 220, height: 320)
+        .frame(width: 260, height: 380)
     }
 
     @ViewBuilder

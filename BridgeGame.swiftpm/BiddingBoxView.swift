@@ -41,9 +41,9 @@ struct BiddingBoxView: View {
             game.placeBid(bid)
         } label: {
             Text(label)
-                .font(.callout.bold())
+                .font(.body.bold())
                 .foregroundColor(enabled ? .white : .secondary)
-                .frame(minWidth: 68, minHeight: 42)
+                .frame(minWidth: 72, minHeight: 48)
                 .padding(.horizontal, 8)
                 .background(enabled ? color : Color(.systemFill))
                 .cornerRadius(8)
@@ -59,13 +59,13 @@ struct BiddingBoxView: View {
         } label: {
             VStack(spacing: 1) {
                 Text("\(level.rawValue)")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
                     .foregroundColor(legal ? .primary : Color.primary.opacity(0.18))
                 Text(strain.display)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(legal ? strain.color : Color.secondary.opacity(0.25))
             }
-            .frame(width: 50, height: 36)
+            .frame(width: 54, height: 40)
             .background(legal ? Color(.secondarySystemBackground) : Color.clear)
             .cornerRadius(6)
             .overlay(
