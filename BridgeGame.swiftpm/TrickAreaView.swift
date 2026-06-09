@@ -33,7 +33,7 @@ struct TrickAreaView: View {
                     .font(.caption)
             }
         }
-        .frame(width: 260, height: 420)
+        .frame(width: 280, height: 530)
     }
 
     @ViewBuilder
@@ -43,7 +43,7 @@ struct TrickAreaView: View {
         } else {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                .frame(width: 66, height: 120)
+                .frame(width: 80, height: 170)
         }
     }
 }

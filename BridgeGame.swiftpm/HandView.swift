@@ -31,7 +31,7 @@ struct HandView: View {
             GeometryReader { geo in
                 faceUpLayoutWide(in: geo)
             }
-            .frame(height: 132)
+            .frame(height: 180)
         } else {
             faceUpLayout
         }
@@ -44,7 +44,7 @@ struct HandView: View {
                 FaceDownCardView(isSmall: isSmall)
             }
         }
-        .frame(height: isSmall ? 50 : 120)
+        .frame(height: isSmall ? 50 : 170)
     }
 
     // Face-up wide: all cards in one touching row, trump suit first
@@ -83,7 +83,7 @@ struct HandView: View {
                 }
             }
         }
-        .frame(width: geo.size.width, height: 132, alignment: .leading)
+        .frame(width: geo.size.width, height: 180, alignment: .leading)
     }
 
     // Face-up: show suits in rows

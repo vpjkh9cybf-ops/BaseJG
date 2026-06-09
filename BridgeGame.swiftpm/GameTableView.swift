@@ -7,7 +7,6 @@ struct GameTableView: View {
     @State private var showSettings: Bool = false
 
     private var isBiddingPhase: Bool { game.phase == .bidding }
-    // North is face-up dummy in a wide row when south is declarer
     private var isNorthWideDummy: Bool { game.dummy == .north && game.contract?.declarer == .south }
     private var isNorthWideDeclarer: Bool {
         game.switchSeatsForDeclarer && game.contract?.declarer == .north && game.phase == .playing
@@ -15,18 +14,18 @@ struct GameTableView: View {
     private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer }
     private var trump: Suit? { game.contract?.strain.suit }
 
-    // Layout ratios — three named states
+    // Layout ratios
     private var northRatio: Double {
-        if isBiddingPhase { return 0.10 }
-        return northIsWide ? 0.22 : 0.16
+        if isBiddingPhase { return 0.09 }
+        return northIsWide ? 0.22 : 0.14
     }
     private var midRatio: Double {
-        if isBiddingPhase { return 0.18 }
-        return northIsWide ? 0.50 : 0.54
+        if isBiddingPhase { return 0.62 }
+        return northIsWide ? 0.54 : 0.56
     }
     private var southRatio: Double {
-        if isBiddingPhase { return 0.72 }
-        return northIsWide ? 0.28 : 0.30
+        if isBiddingPhase { return 0.29 }
+        return northIsWide ? 0.24 : 0.30
     }
     private var layoutKey: String {
         isBiddingPhase ? "bidding" : (northIsWide ? "northWide" : "playing")
@@ -92,7 +91,7 @@ struct GameTableView: View {
     private func isNorthFaceUp() -> Bool {
         guard game.phase == .playing else { return false }
         if game.dummy == .north { return true }
-        if isNorthWideDeclarer { return true }
+        if isNorthWideDeclarer   { return true }
         return false
     }
 
@@ -106,7 +105,7 @@ struct GameTableView: View {
             : nil
         let label: String = {
             let prefix = isBidding(.north) ? "▶ " : ""
-            if isDummy { return prefix + "North (Dummy)" }
+            if isDummy          { return prefix + "North (Dummy)"   }
             if isNorthWideDeclarer { return prefix + "North — Declarer" }
             return prefix + "North"
         }()
@@ -116,7 +115,6 @@ struct GameTableView: View {
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.north))
             if northIsWide {
-                // Dummy shows wide like South, sorted trump-first
                 HandView(cards: northCards, faceDown: false, isSmall: false, isWide: true,
                          trumpSuit: trump, legalCards: legal, onTap: tap)
             } else {
@@ -131,12 +129,21 @@ struct GameTableView: View {
     // MARK: - West hand
 
     private var westArea: some View {
+        let isDummy = game.dummy == .west
+        let isFaceUp = isDummy && game.phase == .playing
+        let westTappable: Bool = game.tappableSeat == .west
+        let legal: Set<Card> = westTappable ? game.legalCards : []
+        let tap: ((Card) -> Void)? = westTappable
+            ? { (c: Card) in game.playCard(c, from: .west) }
+            : nil
+        let label = (isBidding(.west) ? "▶ " : "") + (isDummy ? "West (Dummy)" : "West")
+
         return VStack(spacing: 4) {
-            Text((isBidding(.west) ? "▶ " : "") + "West")
+            Text(label)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.west))
-            HandView(cards: game.hands[.west] ?? [], faceDown: true, isSmall: true,
-                     trumpSuit: trump)
+            HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
+                     trumpSuit: trump, legalCards: legal, onTap: tap)
                 .rotationEffect(.degrees(90))
                 .fixedSize()
         }
@@ -145,12 +152,21 @@ struct GameTableView: View {
     // MARK: - East hand
 
     private var eastArea: some View {
+        let isDummy = game.dummy == .east
+        let isFaceUp = isDummy && game.phase == .playing
+        let eastTappable: Bool = game.tappableSeat == .east
+        let legal: Set<Card> = eastTappable ? game.legalCards : []
+        let tap: ((Card) -> Void)? = eastTappable
+            ? { (c: Card) in game.playCard(c, from: .east) }
+            : nil
+        let label = (isBidding(.east) ? "▶ " : "") + (isDummy ? "East (Dummy)" : "East")
+
         return VStack(spacing: 4) {
-            Text((isBidding(.east) ? "▶ " : "") + "East")
+            Text(label)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.east))
-            HandView(cards: game.hands[.east] ?? [], faceDown: true, isSmall: true,
-                     trumpSuit: trump)
+            HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
+                     trumpSuit: trump, legalCards: legal, onTap: tap)
                 .rotationEffect(.degrees(-90))
                 .fixedSize()
         }
@@ -160,10 +176,8 @@ struct GameTableView: View {
 
     private var centerArea: some View {
         return HStack(spacing: 6) {
-            // Compact left column: score + contract + trick count all stacked
             leftColumn
 
-            // Center: trick area only (no ScoreTickerView — counts are in left column)
             VStack(spacing: 6) {
                 centerContent
                 if !game.statusMessage.isEmpty {
@@ -174,8 +188,8 @@ struct GameTableView: View {
                 }
             }
 
-            // Auction history: always during bidding, only when toggled during play
-            if !game.auction.isEmpty && (isBiddingPhase || showAuction) {
+            // Auction history: only during play when toggled
+            if !game.auction.isEmpty && !isBiddingPhase && showAuction {
                 AuctionView(
                     auction: game.auction,
                     dealer: game.dealer,
@@ -249,14 +263,23 @@ struct GameTableView: View {
     private var centerContent: some View {
         if game.phase == .bidding {
             VStack(spacing: 6) {
-                Text("Auction")
-                    .font(.callout.bold())
-                    .foregroundColor(.white.opacity(0.85))
-                Text("\(game.currentBidder.name)'s turn")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.65))
-                if game.aiThinking {
-                    ProgressView().tint(.white).scaleEffect(0.8)
+                HStack(spacing: 6) {
+                    Text("\(game.currentBidder.name)'s turn")
+                        .font(.caption.bold())
+                        .foregroundColor(.white.opacity(0.75))
+                    if game.aiThinking {
+                        ProgressView().tint(.white).scaleEffect(0.7)
+                    }
+                }
+                if game.isHumanTurn {
+                    BiddingBoxView()
+                } else if !game.auction.isEmpty {
+                    AuctionView(
+                        auction: game.auction,
+                        dealer: game.dealer,
+                        contract: game.contract
+                    )
+                    .frame(maxWidth: 300, maxHeight: .infinity)
                 }
             }
         } else if game.phase == .playing {
@@ -277,30 +300,28 @@ struct GameTableView: View {
     private var southArea: some View {
         let southCards: [Card] = game.hands[.south] ?? []
         let isDeclarer: Bool = game.contract?.declarer == .south
+        let isDummy: Bool = game.dummy == .south
         let southTappable: Bool = game.tappableSeat == .south
         let legal: Set<Card> = southTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = southTappable
             ? { (c: Card) in game.playCard(c, from: .south) }
             : nil
 
-        let southLabel = (isBidding(.south) ? "▶ " : "") + (isDeclarer ? "South — Declarer (You)" : "South (You)")
+        let southLabel: String = {
+            let prefix = isBidding(.south) ? "▶ " : ""
+            if isDeclarer { return prefix + "South — Declarer (You)" }
+            if isDummy    { return prefix + "South (Dummy)" }
+            return prefix + "South (You)"
+        }()
+
         return VStack(spacing: 6) {
             Text(southLabel)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.south))
 
-            if game.phase == .playing {
-                HandView(cards: southCards, faceDown: false, isSmall: false, isWide: true,
-                         trumpSuit: trump, legalCards: legal, onTap: tap)
-            } else {
-                HandView(cards: southCards, faceDown: false, isSmall: false, isWide: true,
-                         trumpSuit: trump)
-            }
-
-            if game.phase == .bidding && game.isHumanTurn {
-                BiddingBoxView()
-                    .padding(.horizontal, 4)
-            }
+            HandView(cards: southCards, faceDown: false, isSmall: false, isWide: true,
+                     trumpSuit: trump, legalCards: legal,
+                     onTap: southTappable ? tap : nil)
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
