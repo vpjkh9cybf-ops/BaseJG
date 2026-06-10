@@ -9,8 +9,16 @@ struct GameTableView: View {
     private var isBiddingPhase: Bool { game.phase == .bidding }
     private var trump: Suit? { game.contract?.strain.suit }
 
+    // Dummy is revealed only after the opening lead is played
+    private var dummyRevealed: Bool {
+        guard game.phase == .playing else { return false }
+        return (game.currentTrick?.plays.count ?? 0) > 0 || !game.completedTricks.isEmpty
+    }
+
     // North is displayed wide when it's the dummy or when switchSeats has N as declarer
-    private var isNorthWideDummy: Bool { game.dummy == .north && game.contract?.declarer == .south }
+    private var isNorthWideDummy: Bool {
+        dummyRevealed && game.dummy == .north && game.contract?.declarer == .south
+    }
     private var isNorthWideDeclarer: Bool {
         game.switchSeatsForDeclarer && game.contract?.declarer == .north && game.phase == .playing
     }
@@ -18,7 +26,7 @@ struct GameTableView: View {
 
     // E/W dummy shown large in center instead of rotated side column
     private var isEWDummyActive: Bool {
-        guard game.phase == .playing, let d = game.dummy else { return false }
+        guard dummyRevealed, let d = game.dummy else { return false }
         return d == .east || d == .west
     }
 
@@ -202,7 +210,7 @@ struct GameTableView: View {
 
     private func isNorthFaceUp() -> Bool {
         guard game.phase == .playing else { return false }
-        if game.dummy == .north { return true }
+        if game.dummy == .north { return dummyRevealed }
         if isNorthWideDeclarer   { return true }
         return false
     }
@@ -242,7 +250,7 @@ struct GameTableView: View {
 
     private var westArea: some View {
         let isDummy  = game.dummy == .west
-        let isFaceUp = isDummy && game.phase == .playing
+        let isFaceUp = isDummy && dummyRevealed
         let westTappable: Bool = !isEWDummyActive && game.tappableSeat == .west
         let legal: Set<Card> = westTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = westTappable
@@ -273,7 +281,7 @@ struct GameTableView: View {
 
     private var eastArea: some View {
         let isDummy  = game.dummy == .east
-        let isFaceUp = isDummy && game.phase == .playing
+        let isFaceUp = isDummy && dummyRevealed
         let eastTappable: Bool = !isEWDummyActive && game.tappableSeat == .east
         let legal: Set<Card> = eastTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = eastTappable
