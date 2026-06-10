@@ -34,6 +34,7 @@ class GameState: ObservableObject {
     @Published var rubberScore = RubberScore()
     @Published var statusMessage: String = ""
     @Published var aiThinking: Bool = false
+    @Published var claimDenied: Bool = false
 
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
@@ -188,6 +189,32 @@ class GameState: ObservableObject {
         applyCard(card, from: seat)
     }
 
+    func canClaim() -> Bool {
+        guard case .playing = phase, let c = contract else { return false }
+        let remaining = 13 - completedTricks.count
+        guard remaining > 0 else { return false }
+        let declarerSeats: [Seat] = c.declarer.isNorthSouth ? [.north, .south] : [.east, .west]
+        let opponentSeats: [Seat] = Seat.allCases.filter { !declarerSeats.contains($0) }
+        let ourCards   = declarerSeats.compactMap { hands[$0] }.flatMap { $0 }
+        let theirCards = opponentSeats.compactMap { hands[$0] }.flatMap { $0 }
+        var winners = 0
+        for suit in Suit.allCases {
+            let ours   = ourCards.filter   { $0.suit == suit }.sorted { $0.rank > $1.rank }
+            let theirs = theirCards.filter { $0.suit == suit }.sorted { $0.rank > $1.rank }
+            if theirs.isEmpty { winners += ours.count }
+            else { winners += ours.filter { $0.rank > theirs[0].rank }.count }
+        }
+        return winners >= remaining
+    }
+
+    func claimTricks() {
+        guard case .playing = phase, let c = contract else { return }
+        guard canClaim() else { claimDenied = true; return }
+        let remaining = 13 - completedTricks.count
+        if c.declarer.isNorthSouth { nsTricks += remaining } else { ewTricks += remaining }
+        finishHand()
+    }
+
     func acknowledgeResult() {
         guard case .handResult = phase else { return }
         dealer = dealer.next
@@ -304,7 +331,7 @@ class GameState: ObservableObject {
         triggerAIIfNeeded()
     }
 
-    private func finishHand() {
+    func finishHand() {
         guard let c = contract else { return }
         let tricks = c.declarer.isNorthSouth ? nsTricks : ewTricks
         let result = HandResult(contract: c, declarer: c.declarer,

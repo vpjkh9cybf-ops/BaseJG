@@ -4,6 +4,12 @@ import SwiftUI
 struct TrickAreaView: View {
     let trick: Trick?
     let contract: Contract?
+    var compact: Bool = false
+
+    private var frameW: CGFloat { compact ? 220 : 280 }
+    private var frameH: CGFloat { compact ? 300 : 530 }
+    private var slotW:  CGFloat { compact ?  60 :  80 }
+    private var slotH:  CGFloat { compact ?  90 : 170 }
 
     var body: some View {
         ZStack {
@@ -16,15 +22,11 @@ struct TrickAreaView: View {
 
             if let trick = trick {
                 VStack(spacing: 2) {
-                    // North card
                     trickCard(for: .north, in: trick)
-                    HStack(spacing: 20) {
-                        // West card
+                    HStack(spacing: compact ? 12 : 20) {
                         trickCard(for: .west, in: trick)
-                        // East card
                         trickCard(for: .east, in: trick)
                     }
-                    // South card
                     trickCard(for: .south, in: trick)
                 }
             } else {
@@ -33,17 +35,17 @@ struct TrickAreaView: View {
                     .font(.caption)
             }
         }
-        .frame(width: 280, height: 530)
+        .frame(width: frameW, height: frameH)
     }
 
     @ViewBuilder
     private func trickCard(for seat: Seat, in trick: Trick) -> some View {
         if let card = trick.card(for: seat) {
-            CardView(card: card, isSmall: false)
+            CardView(card: card, isCompact: compact)
         } else {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                .frame(width: 80, height: 170)
+                .frame(width: slotW, height: slotH)
         }
     }
 }

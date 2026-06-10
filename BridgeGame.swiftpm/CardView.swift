@@ -7,27 +7,36 @@ struct CardView: View {
     var isSmall: Bool = false
     var isMedium: Bool = false
     var wideHand: Bool = false
+    var isCompact: Bool = false   // Compact trick area (when E/W dummy shown in center)
 
-    private var width:   CGFloat { isSmall ? 34 : (isMedium ? 44 : (wideHand ? 86 : 80)) }
-    private var height:  CGFloat { isSmall ? 50 : (isMedium ? 62 : (wideHand ? 180 : 170)) }
-    private var radius:  CGFloat { isSmall ? 4  : (isMedium ? 5  : 8) }
+    private var width:   CGFloat {
+        if isSmall   { return 34 }
+        if isMedium  { return 44 }
+        if isCompact { return 60 }
+        if wideHand  { return 86 }
+        return 80
+    }
+    private var height:  CGFloat {
+        if isSmall   { return 50 }
+        if isMedium  { return 62 }
+        if isCompact { return 90 }
+        if wideHand  { return 180 }
+        return 170
+    }
+    private var radius:  CGFloat { isSmall ? 4 : (isMedium ? 5 : 8) }
 
     private var rankFont: Font {
         if isSmall   { return .system(size: 10, weight: .bold) }
         if isMedium  { return .system(size: 13, weight: .bold) }
+        if isCompact { return .system(size: 28, weight: .bold) }
         if wideHand  { return .system(size: 60, weight: .bold) }
         return .system(size: 50, weight: .bold)
     }
-    private var indexSuitFont: Font {
-        if isSmall   { return .system(size: 8) }
-        if isMedium  { return .system(size: 10) }
-        if wideHand  { return .system(size: 36) }
-        return .system(size: 30)
-    }
     private var centerSuitFont: Font {
-        if isSmall  { return .body }
-        if isMedium { return .title3 }
-        if wideHand { return .system(size: 60) }
+        if isSmall   { return .body }
+        if isMedium  { return .title3 }
+        if isCompact { return .system(size: 28) }
+        if wideHand  { return .system(size: 60) }
         return .system(size: 50)
     }
 
@@ -43,23 +52,17 @@ struct CardView: View {
                 )
 
             VStack(spacing: 0) {
-                // Rank + suit centered at top
-                VStack(spacing: isSmall ? 0 : 2) {
-                    Text(card.rank.display)
-                        .font(rankFont)
-                        .foregroundColor(card.suit.color)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    Text(card.suit.symbol)
-                        .font(indexSuitFont)
-                        .foregroundColor(card.suit.color)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .padding(.top, isSmall ? 2 : 6)
-                .padding(.horizontal, isSmall ? 2 : 4)
+                // Rank only at top, centered
+                Text(card.rank.display)
+                    .font(rankFont)
+                    .foregroundColor(card.suit.color)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, isSmall ? 2 : 6)
+                    .padding(.horizontal, isSmall ? 2 : 4)
 
                 Spacer(minLength: 0)
 
-                // Large centered suit symbol
+                // Suit symbol centered
                 Text(card.suit.symbol)
                     .font(centerSuitFont)
                     .foregroundColor(card.suit.color)
