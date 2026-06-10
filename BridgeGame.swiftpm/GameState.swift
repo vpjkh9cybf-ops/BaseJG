@@ -279,10 +279,10 @@ class GameState: ObservableObject {
         guard let c = buildContract() else { return }
         contract = c
         dummy    = c.declarer.partner
-        statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.next.name) leads"
+        statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.prev.name) leads"
 
         phase = .playing
-        currentTrick = Trick(leader: c.declarer.next, plays: [], trump: c.strain.suit)
+        currentTrick = Trick(leader: c.declarer.prev, plays: [], trump: c.strain.suit)
         triggerAIIfNeeded()
     }
 
