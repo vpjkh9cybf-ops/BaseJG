@@ -70,7 +70,8 @@ struct BiddingAI {
         hand: [Card],
         seat: Seat,
         auction: [(seat: Seat, bid: Bid)],
-        vulnerability: Vulnerability
+        vulnerability: Vulnerability,
+        rkcbFlavor: RKCBFlavor = .f1430
     ) -> Bid {
         let eval = HandEvaluator.evaluate(hand)
         let ctx  = AuctionContext(seat: seat, auction: auction)
@@ -86,17 +87,17 @@ struct BiddingAI {
         }
 
         if ctx.partnerRebid {
-            return responderRebid(eval: eval, hand: hand, ctx: ctx)
+            return responderRebid(eval: eval, hand: hand, ctx: ctx, rkcbFlavor: rkcbFlavor)
         }
 
-        // Respond to partner's Blackwood ask (regardless of auction round)
+        // Respond to partner's RKCB ask (regardless of auction round)
         if ctx.partnerAskedForAces {
-            return blackwoodResponse(eval: eval, hand: hand)
+            return rkcbResponse(eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor)
         }
 
-        // I asked Blackwood; partner just answered — place the contract
+        // I asked RKCB; partner just answered — place the contract
         if ctx.justReceivedBlackwoodResponse, let bwResp = ctx.partnerLastContractBid {
-            return blackwoodFollowup(response: bwResp, eval: eval, hand: hand, ctx: ctx)
+            return rkcbFollowup(response: bwResp, eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor)
         }
 
         if ctx.opponentIntervened {
@@ -594,15 +595,15 @@ struct BiddingAI {
 
     // MARK: - Responder Rebid
 
-    private static func responderRebid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
+    private static func responderRebid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext, rkcbFlavor: RKCBFlavor) -> Bid {
         let hcp = eval.hcp
         guard let partnerRebidBid = ctx.partnerLastContractBid else { return .pass }
         guard let myResp = ctx.myLastContractBid else { return .pass }
         let partnerFirstBid = ctx.partnerFirstContractBid
 
-        // ── After Blackwood ───────────────────────────────────────────────────
-        if ctx.partnerAskedForAces { return blackwoodResponse(eval: eval, hand: hand) }
-        if ctx.iAskedForAces       { return blackwoodFollowup(response: partnerRebidBid, eval: eval, hand: hand, ctx: ctx) }
+        // ── After RKCB ────────────────────────────────────────────────────────
+        if ctx.partnerAskedForAces { return rkcbResponse(eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor) }
+        if ctx.iAskedForAces       { return rkcbFollowup(response: partnerRebidBid, eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor) }
 
         // ── After Drury 2♣ (partner opened 1M, I bid 2♣ = limit raise) ───────
         if myResp == .contract(.two, .clubs) {
@@ -709,60 +710,111 @@ struct BiddingAI {
         return .pass
     }
 
-    // MARK: - Blackwood
+    // MARK: - RKCB (Roman Key Card Blackwood)
 
-    private static func blackwoodResponse(eval: HandEvaluation, hand: [Card]) -> Bid {
+    // Determine the agreed trump suit from the auction context
+    private static func agreedTrumpSuit(ctx: AuctionContext) -> Suit? {
+        // Prefer the most recently agreed major (both sides bid it)
+        let allSuitBids = ctx.auction.filter { $0.bid.isSuitBid && $0.bid.strain != .notrump }
+        let suitCounts = Dictionary(grouping: allSuitBids, by: { $0.bid.strain! })
+            .mapValues { $0.count }
+        // Both sides agreed on a major
+        for suit in [Suit.spades, .hearts] {
+            if (ctx.myBids.contains   { $0.bid.strain == suit.strain }) &&
+               (ctx.partnerBids.contains { $0.bid.strain == suit.strain }) {
+                return suit
+            }
+        }
+        // Partner bid a major
+        if let s = ctx.partnerBids.last(where: { $0.bid.strain?.isMajor == true })?.bid.strain?.suit { return s }
+        // I bid a major
+        if let s = ctx.myBids.last(where: { $0.bid.strain?.isMajor == true })?.bid.strain?.suit { return s }
+        // Any suit from auction
+        return allSuitBids.last?.bid.strain?.suit
+    }
+
+    // Count RKCB key cards: 4 aces + king of agreed trump suit (max 5)
+    private static func keyCardCount(hand: [Card], trumpSuit: Suit?) -> Int {
         let aces = hand.filter { $0.rank == .ace }.count
-        switch aces {
-        case 0, 4: return .contract(.five, .clubs)
-        case 1:    return .contract(.five, .diamonds)
-        case 2:    return .contract(.five, .hearts)
-        case 3:    return .contract(.five, .spades)
-        default:   return .contract(.five, .clubs)
+        let trumpKing: Int = trumpSuit.map { suit in
+            hand.contains { $0.suit == suit && $0.rank == .king } ? 1 : 0
+        } ?? 0
+        return min(aces + trumpKing, 5)
+    }
+
+    // Respond to partner's 4NT RKCB ask
+    private static func rkcbResponse(eval: HandEvaluation, hand: [Card], ctx: AuctionContext, flavor: RKCBFlavor) -> Bid {
+        let trump = agreedTrumpSuit(ctx: ctx)
+        let keyCards = keyCardCount(hand: hand, trumpSuit: trump)
+        let hasQueenOfTrump = trump.map { suit in
+            hand.contains { $0.suit == suit && $0.rank == .queen }
+        } ?? false
+
+        switch flavor {
+        case .f1430:
+            switch keyCards {
+            case 1, 4: return .contract(.five, .clubs)     // 1 or 4
+            case 0, 3: return .contract(.five, .diamonds)  // 0 or 3
+            default:   // 2 or 5
+                return hasQueenOfTrump ? .contract(.five, .spades) : .contract(.five, .hearts)
+            }
+        case .f0314:
+            switch keyCards {
+            case 0, 3: return .contract(.five, .clubs)     // 0 or 3
+            case 1, 4: return .contract(.five, .diamonds)  // 1 or 4
+            default:   // 2 or 5
+                return hasQueenOfTrump ? .contract(.five, .spades) : .contract(.five, .hearts)
+            }
         }
     }
 
-    // After I bid 4NT and partner responded, place the contract
-    private static func blackwoodFollowup(
+    // After I bid 4NT (RKCB) and partner responded, place the contract
+    private static func rkcbFollowup(
         response: Bid,
         eval: HandEvaluation,
         hand: [Card],
-        ctx: AuctionContext
+        ctx: AuctionContext,
+        flavor: RKCBFlavor
     ) -> Bid {
-        // Decode aces from partner's response
-        let acesShown: Int = {
-            switch response {
-            case .contract(.five, .clubs):    return 0  // or 4
-            case .contract(.five, .diamonds): return 1
-            case .contract(.five, .hearts):   return 2
-            case .contract(.five, .spades):   return 3
-            default:                          return 0
+        let trump = agreedTrumpSuit(ctx: ctx)
+        let myKeyCards = keyCardCount(hand: hand, trumpSuit: trump)
+
+        // Decode partner's key card count (use the lower ambiguous value — conservative)
+        let partnerKeyCards: Int = {
+            switch (flavor, response) {
+            case (.f1430, .contract(.five, .clubs)):    return 1  // 1 or 4
+            case (.f1430, .contract(.five, .diamonds)): return 0  // 0 or 3
+            case (.f0314, .contract(.five, .clubs)):    return 0  // 0 or 3
+            case (.f0314, .contract(.five, .diamonds)): return 1  // 1 or 4
+            case (_, .contract(.five, .hearts)):        return 2  // 2, no Q
+            case (_, .contract(.five, .spades)):        return 2  // 2, with Q
+            default:                                    return 0
             }
         }()
 
-        let myAces = hand.filter { $0.rank == .ace }.count
-        let totalAces = myAces + acesShown
+        let hasPartnerQueenOfTrump = (response == .contract(.five, .spades))
+        let totalKeyCards = myKeyCards + partnerKeyCards
         let myHcp = eval.hcp
 
-        // Find the agreed suit from our earlier bids
-        let agreedStrain: Strain? = ctx.myBids.dropLast()
-            .reversed()
-            .first(where: { $0.bid.isSuitBid && $0.bid.strain != .notrump })
-            .flatMap { $0.bid.strain }
+        let agreedStrain: Strain = trump.map { $0.strain } ?? .notrump
 
-        if totalAces < 3 {
-            // Missing two+ aces: sign off at 5-level
-            if let suit = agreedStrain { return .contract(.five, suit) }
-            return .contract(.five, .notrump)
+        // Missing 2+ key cards → sign off at the five-level
+        if totalKeyCards < 4 {
+            return .contract(.five, agreedStrain)
         }
 
-        // All aces: bid slam
-        if let suit = agreedStrain {
-            if myHcp >= 16 && totalAces == 4 { return .contract(.seven, suit) } // Grand
-            return .contract(.six, suit)
+        // Check for grand slam: all 5 key cards + trump queen present
+        let hasQueenOfTrump = trump.map { suit in
+            hand.contains { $0.suit == suit && $0.rank == .queen }
+        } ?? false
+        let trumpQueenAccounted = hasQueenOfTrump || hasPartnerQueenOfTrump || (totalKeyCards == 5)
+
+        if totalKeyCards == 5 && trumpQueenAccounted && myHcp >= 13 {
+            return .contract(.seven, agreedStrain)
         }
-        if myHcp >= 16 && totalAces == 4 { return .contract(.seven, .notrump) }
-        return .contract(.six, .notrump)
+
+        // Small slam
+        return .contract(.six, agreedStrain)
     }
 
     // MARK: - Competitive Bidding

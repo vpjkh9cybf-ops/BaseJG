@@ -378,11 +378,15 @@ struct GameTableView: View {
                         ProgressView().tint(.white).scaleEffect(0.7)
                     }
                 }
-                if game.isHumanTurn {
-                    BiddingBoxView()
-                } else if !game.auction.isEmpty {
-                    AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
-                        .frame(maxWidth: 300, maxHeight: .infinity)
+                // Auction always visible so South knows what was bid before their turn
+                HStack(alignment: .top, spacing: 8) {
+                    if !game.auction.isEmpty {
+                        AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
+                            .frame(minWidth: 160, maxWidth: 200, maxHeight: .infinity)
+                    }
+                    if game.isHumanTurn {
+                        BiddingBoxView()
+                    }
                 }
             }
         } else if game.phase == .playing {

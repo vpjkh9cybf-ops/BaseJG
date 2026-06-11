@@ -1,6 +1,11 @@
 // BRIDGE APP — Built 2026-06-07
 import SwiftUI
 
+enum RKCBFlavor: String, CaseIterable {
+    case f1430 = "1430"   // 5♣ = 1 or 4 key cards, 5♦ = 0 or 3
+    case f0314 = "0314"   // 5♣ = 0 or 3 key cards, 5♦ = 1 or 4
+}
+
 enum GamePhase: Equatable {
     case menu
     case bidding
@@ -38,6 +43,7 @@ class GameState: ObservableObject {
 
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
+    @Published var rkcbFlavor: RKCBFlavor = .f1430
 
     // MARK: - Computed
 
@@ -253,11 +259,13 @@ class GameState: ObservableObject {
         let hand     = hands[bidder] ?? []
         let snapshot = auction.map { (seat: $0.seat, bid: $0.bid) }
         let vul      = vulnerability
+        let flavor   = rkcbFlavor
 
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             let bid = BiddingAI.selectBid(hand: hand, seat: bidder,
-                                          auction: snapshot, vulnerability: vul)
+                                          auction: snapshot, vulnerability: vul,
+                                          rkcbFlavor: flavor)
             self.aiThinking = false
             self.auction.append(AuctionEntry(seat: bidder, bid: bid))
             if self.biddingIsComplete { self.finalizeBidding() }
