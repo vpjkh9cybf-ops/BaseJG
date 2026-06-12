@@ -6,6 +6,7 @@ struct HandView: View {
     let faceDown: Bool
     let isSmall: Bool
     var isWide: Bool = false
+    var isMedium: Bool = false
     var trumpSuit: Suit? = nil
     var legalCards: Set<Card> = []
     var onTap: ((Card) -> Void)? = nil
@@ -103,12 +104,12 @@ struct HandView: View {
                                 Button {
                                     onTap?(card)
                                 } label: {
-                                    CardView(card: card, isHighlighted: isLegal, isSmall: isSmall)
+                                    CardView(card: card, isHighlighted: isLegal, isSmall: isSmall, isMedium: isMedium)
                                 }
                                 .disabled(!isLegal)
                                 .opacity(isLegal || legalCards.isEmpty ? 1.0 : 0.55)
                             } else {
-                                CardView(card: card, isSmall: isSmall)
+                                CardView(card: card, isSmall: isSmall, isMedium: isMedium)
                             }
                         }
                     }

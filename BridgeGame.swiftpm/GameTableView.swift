@@ -15,6 +15,10 @@ struct GameTableView: View {
         return (game.currentTrick?.plays.count ?? 0) > 0 || !game.completedTricks.isEmpty
     }
 
+    private var ewDummyRevealed: Bool {
+        dummyRevealed && (game.dummy == .east || game.dummy == .west)
+    }
+
     // North is displayed wide when it's the dummy or when switchSeats has N as declarer
     private var isNorthWideDummy: Bool {
         dummyRevealed && game.dummy == .north && game.contract?.declarer == .south
@@ -75,10 +79,16 @@ struct GameTableView: View {
                             .frame(height: geo.size.height * northRatio)
 
                         HStack(alignment: .center, spacing: 0) {
-                            let sideW = (geo.size.width - 110) * 0.20
-                            westArea.frame(width: sideW)
+                            let mainW = geo.size.width - 110
+                            let westW = game.dummy == .west && ewDummyRevealed
+                                ? mainW * 0.33
+                                : ewDummyRevealed ? mainW * 0.13 : mainW * 0.20
+                            let eastW = game.dummy == .east && ewDummyRevealed
+                                ? mainW * 0.33
+                                : ewDummyRevealed ? mainW * 0.13 : mainW * 0.20
+                            westArea.frame(width: westW)
                             centerArea.frame(maxWidth: .infinity)
-                            eastArea.frame(width: sideW)
+                            eastArea.frame(width: eastW)
                         }
                         .frame(height: geo.size.height * midRatio)
 
@@ -250,21 +260,35 @@ struct GameTableView: View {
         let tap: ((Card) -> Void)? = westTappable
             ? { (c: Card) in game.playCard(c, from: .west) }
             : nil
-        let label = (isBidding(.west) ? "▶ " : "") + (isDummy ? "West\n(Dummy)" : "West")
 
-        return ZStack(alignment: .top) {
-            HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
-                     trumpSuit: trump, legalCards: legal, onTap: tap)
-                .rotationEffect(.degrees(90))
-                .fixedSize()
-            Text(label)
-                .font(.callout.bold())
-                .foregroundColor(seatColor(.west))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
-                .cornerRadius(4)
-                .padding(.top, 4)
+        return Group {
+            if isFaceUp && ewDummyRevealed {
+                VStack(spacing: 4) {
+                    Text((isBidding(.west) ? "▶ " : "") + "West (Dummy)")
+                        .font(.callout.bold())
+                        .foregroundColor(seatColor(.west))
+                    HandView(cards: game.hands[.west] ?? [], faceDown: false,
+                             isSmall: false, isMedium: true,
+                             trumpSuit: trump, legalCards: legal, onTap: tap)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+            } else {
+                ZStack(alignment: .top) {
+                    HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
+                             trumpSuit: trump, legalCards: legal, onTap: tap)
+                        .rotationEffect(.degrees(90))
+                        .fixedSize()
+                    Text((isBidding(.west) ? "▶ " : "") + (isDummy ? "West\n(Dummy)" : "West"))
+                        .font(.callout.bold())
+                        .foregroundColor(seatColor(.west))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
+                        .cornerRadius(4)
+                        .padding(.top, 4)
+                }
+            }
         }
     }
 
@@ -278,21 +302,35 @@ struct GameTableView: View {
         let tap: ((Card) -> Void)? = eastTappable
             ? { (c: Card) in game.playCard(c, from: .east) }
             : nil
-        let label = (isBidding(.east) ? "▶ " : "") + (isDummy ? "East\n(Dummy)" : "East")
 
-        return ZStack(alignment: .top) {
-            HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
-                     trumpSuit: trump, legalCards: legal, onTap: tap)
-                .rotationEffect(.degrees(-90))
-                .fixedSize()
-            Text(label)
-                .font(.callout.bold())
-                .foregroundColor(seatColor(.east))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
-                .cornerRadius(4)
-                .padding(.top, 4)
+        return Group {
+            if isFaceUp && ewDummyRevealed {
+                VStack(spacing: 4) {
+                    Text((isBidding(.east) ? "▶ " : "") + "East (Dummy)")
+                        .font(.callout.bold())
+                        .foregroundColor(seatColor(.east))
+                    HandView(cards: game.hands[.east] ?? [], faceDown: false,
+                             isSmall: false, isMedium: true,
+                             trumpSuit: trump, legalCards: legal, onTap: tap)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+            } else {
+                ZStack(alignment: .top) {
+                    HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
+                             trumpSuit: trump, legalCards: legal, onTap: tap)
+                        .rotationEffect(.degrees(-90))
+                        .fixedSize()
+                    Text((isBidding(.east) ? "▶ " : "") + (isDummy ? "East\n(Dummy)" : "East"))
+                        .font(.callout.bold())
+                        .foregroundColor(seatColor(.east))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
+                        .cornerRadius(4)
+                        .padding(.top, 4)
+                }
+            }
         }
     }
 
