@@ -6,6 +6,7 @@ struct HandResult {
     let declarer: Seat
     let tricksWon: Int
     let vulnerability: Vulnerability
+    let scoringMode: ScoringMode
 
     var made: Bool { tricksWon >= contract.tricksRequired }
     var overtricks: Int { made ? tricksWon - contract.tricksRequired : 0 }
@@ -59,6 +60,12 @@ struct HandResult {
         if contract.isGrandSlam { score += isVulnerable ? 1500 : 1000 }
         else if contract.isSmallSlam { score += isVulnerable ? 750 : 500 }
 
+        // Chicago: game/partial bonus per hand
+        if scoringMode == .chicago {
+            if contract.isGame { score += isVulnerable ? 500 : 300 }
+            else               { score += 50 }
+        }
+
         return score
     }
 
@@ -89,7 +96,7 @@ struct HandResult {
 
 @MainActor
 class RubberScore: ObservableObject {
-    // Running below-the-line partial scores (reset on game)
+    // Accumulated below-the-line totals (never reset in rubber)
     @Published var nsBelow: Int = 0
     @Published var ewBelow: Int = 0
 
@@ -100,14 +107,37 @@ class RubberScore: ObservableObject {
     @Published var nsGames: Int = 0
     @Published var ewGames: Int = 0
 
+    // Current partial toward next game (resets on game)
+    @Published var nsPartial: Int = 0
+    @Published var ewPartial: Int = 0
+
     @Published var handHistory: [HandResult] = []
 
-    var rubberOver: Bool { nsGames >= 2 || ewGames >= 2 }
+    var scoringMode: ScoringMode = .rubber
 
-    var nsTotal: Int { nsAbove + nsBelow + (nsGames >= 2 ? rubberBonus(winner: .north) : 0) }
-    var ewTotal: Int { ewAbove + ewBelow + (ewGames >= 2 ? rubberBonus(winner: .east)  : 0) }
+    var rubberOver: Bool {
+        if scoringMode == .chicago { return handHistory.count >= 4 }
+        return nsGames >= 2 || ewGames >= 2
+    }
+
+    var nsTotal: Int {
+        if scoringMode == .chicago { return nsBelow }
+        return nsAbove + nsBelow + (nsGames >= 2 ? rubberBonus(winner: .north) : 0)
+    }
+    var ewTotal: Int {
+        if scoringMode == .chicago { return ewBelow }
+        return ewAbove + ewBelow + (ewGames >= 2 ? rubberBonus(winner: .east) : 0)
+    }
 
     var currentVulnerability: Vulnerability {
+        if scoringMode == .chicago {
+            switch handHistory.count % 4 {
+            case 0: return .neither
+            case 1: return .northSouth
+            case 2: return .eastWest
+            default: return .both
+            }
+        }
         switch (nsGames > 0, ewGames > 0) {
         case (false, false): return .neither
         case (true,  false): return .northSouth
@@ -118,32 +148,43 @@ class RubberScore: ObservableObject {
 
     func recordHand(_ result: HandResult) {
         handHistory.append(result)
-        let net = result.netScore
 
+        if scoringMode == .chicago {
+            let pts = abs(result.netScore)
+            if result.made {
+                if result.declarerIsNS { nsBelow += pts } else { ewBelow += pts }
+            } else {
+                // penalty goes to defending side
+                if result.declarerIsNS { ewBelow += pts } else { nsBelow += pts }
+            }
+            return
+        }
+
+        // Rubber mode
         if result.made {
             let below = result.belowLineScore
-            let above = abs(net) - below
-
+            let above = abs(result.netScore) - below
             if result.declarerIsNS {
+                nsPartial += below
                 nsBelow += below
                 nsAbove += above
             } else {
+                ewPartial += below
                 ewBelow += below
                 ewAbove += above
             }
-
-            // Check for game
-            if nsBelow >= 100 {
+            // game check uses nsPartial/ewPartial
+            if nsPartial >= 100 {
                 nsGames += 1
-                nsBelow = 0
-                ewBelow = 0
-            } else if ewBelow >= 100 {
+                nsPartial = 0
+                ewPartial = 0
+            } else if ewPartial >= 100 {
                 ewGames += 1
-                nsBelow = 0
-                ewBelow = 0
+                nsPartial = 0
+                ewPartial = 0
             }
         } else {
-            let penalty = abs(net)
+            let penalty = abs(result.netScore)
             if result.declarerIsNS {
                 ewAbove += penalty
             } else {
@@ -157,10 +198,12 @@ class RubberScore: ObservableObject {
         return loserGames == 0 ? 700 : 500
     }
 
-    func reset() {
+    func reset(mode: ScoringMode = .rubber) {
+        scoringMode = mode
         nsBelow = 0; ewBelow = 0
         nsAbove = 0; ewAbove = 0
         nsGames = 0; ewGames = 0
+        nsPartial = 0; ewPartial = 0
         handHistory = []
     }
 }

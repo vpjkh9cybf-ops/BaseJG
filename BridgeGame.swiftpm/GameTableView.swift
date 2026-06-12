@@ -24,43 +24,37 @@ struct GameTableView: View {
     }
     private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer }
 
-    // E/W dummy shown large in center instead of rotated side column
-    private var isEWDummyActive: Bool {
-        guard dummyRevealed, let d = game.dummy else { return false }
-        return d == .east || d == .west
-    }
-
     // Layout ratios for the north / mid / south rows
     private var northRatio: Double {
         if isBiddingPhase        { return 0.09 }
         if northIsWide           { return 0.22 }
-        if isEWDummyActive       { return 0.09 }
         return 0.14
     }
     private var midRatio: Double {
         if isBiddingPhase        { return 0.62 }
         if northIsWide           { return 0.54 }
-        if isEWDummyActive       { return 0.63 }
         return 0.56
     }
     private var southRatio: Double {
         if isBiddingPhase        { return 0.29 }
         if northIsWide           { return 0.24 }
-        if isEWDummyActive       { return 0.28 }
         return 0.30
     }
     private var layoutKey: String {
         if isBiddingPhase  { return "bidding" }
         if northIsWide     { return "northWide" }
-        if isEWDummyActive { return "ewDummy" }
         return "playing"
     }
 
     private func isBidding(_ seat: Seat) -> Bool {
         game.phase == .bidding && game.currentBidder == seat
     }
+    private func isVulnerable(_ seat: Seat) -> Bool {
+        game.vulnerability.isVulnerable(seat)
+    }
     private func seatColor(_ seat: Seat) -> Color {
-        isBidding(seat) ? .yellow : .white.opacity(0.85)
+        if isBidding(seat) { return .yellow }
+        return isVulnerable(seat) ? .red : .white.opacity(0.85)
     }
 
     var body: some View {
@@ -251,29 +245,26 @@ struct GameTableView: View {
     private var westArea: some View {
         let isDummy  = game.dummy == .west
         let isFaceUp = isDummy && dummyRevealed
-        let westTappable: Bool = !isEWDummyActive && game.tappableSeat == .west
+        let westTappable: Bool = game.tappableSeat == .west
         let legal: Set<Card> = westTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = westTappable
             ? { (c: Card) in game.playCard(c, from: .west) }
             : nil
         let label = (isBidding(.west) ? "▶ " : "") + (isDummy ? "West\n(Dummy)" : "West")
 
-        return VStack(spacing: 4) {
+        return ZStack(alignment: .top) {
+            HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
+                     trumpSuit: trump, legalCards: legal, onTap: tap)
+                .rotationEffect(.degrees(90))
+                .fixedSize()
             Text(label)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.west))
                 .multilineTextAlignment(.center)
-            if isEWDummyActive && isDummy {
-                // Dummy is shown large in center — just show label here
-                Text("↓ center")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.5))
-            } else {
-                HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
-                         trumpSuit: trump, legalCards: legal, onTap: tap)
-                    .rotationEffect(.degrees(90))
-                    .fixedSize()
-            }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
+                .cornerRadius(4)
+                .padding(.top, 4)
         }
     }
 
@@ -282,28 +273,26 @@ struct GameTableView: View {
     private var eastArea: some View {
         let isDummy  = game.dummy == .east
         let isFaceUp = isDummy && dummyRevealed
-        let eastTappable: Bool = !isEWDummyActive && game.tappableSeat == .east
+        let eastTappable: Bool = game.tappableSeat == .east
         let legal: Set<Card> = eastTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = eastTappable
             ? { (c: Card) in game.playCard(c, from: .east) }
             : nil
         let label = (isBidding(.east) ? "▶ " : "") + (isDummy ? "East\n(Dummy)" : "East")
 
-        return VStack(spacing: 4) {
+        return ZStack(alignment: .top) {
+            HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
+                     trumpSuit: trump, legalCards: legal, onTap: tap)
+                .rotationEffect(.degrees(-90))
+                .fixedSize()
             Text(label)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.east))
                 .multilineTextAlignment(.center)
-            if isEWDummyActive && isDummy {
-                Text("↓ center")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.5))
-            } else {
-                HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
-                         trumpSuit: trump, legalCards: legal, onTap: tap)
-                    .rotationEffect(.degrees(-90))
-                    .fixedSize()
-            }
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
+                .cornerRadius(4)
+                .padding(.top, 4)
         }
     }
 
@@ -311,15 +300,11 @@ struct GameTableView: View {
 
     private var centerArea: some View {
         VStack(spacing: 6) {
-            if isEWDummyActive {
-                ewDummyAndTrickLayout
-            } else {
-                HStack(spacing: 6) {
-                    centerContent
-                    if !game.auction.isEmpty && !isBiddingPhase && showAuction {
-                        AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
-                            .frame(maxWidth: 175, maxHeight: .infinity)
-                    }
+            HStack(spacing: 6) {
+                centerContent
+                if !game.auction.isEmpty && !isBiddingPhase && showAuction {
+                    AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
+                        .frame(maxWidth: 175, maxHeight: .infinity)
                 }
             }
 
@@ -331,39 +316,6 @@ struct GameTableView: View {
             }
         }
         .padding(.horizontal, 6)
-    }
-
-    // E/W dummy shown face-up horizontally above the compact trick area
-    @ViewBuilder
-    private var ewDummyAndTrickLayout: some View {
-        let dummySeat = game.dummy!
-        let dummyCards = game.hands[dummySeat] ?? []
-        let dummyTappable = game.tappableSeat == dummySeat
-        let legal: Set<Card> = dummyTappable ? game.legalCards : []
-        let tap: ((Card) -> Void)? = dummyTappable
-            ? { (c: Card) in game.playCard(c, from: dummySeat) }
-            : nil
-
-        VStack(spacing: 4) {
-            Text("\(dummySeat.name) (Dummy)")
-                .font(.callout.bold())
-                .foregroundColor(.white.opacity(0.85))
-
-            GeometryReader { geo in
-                HandView(cards: dummyCards, faceDown: false, isSmall: false, isWide: true,
-                         trumpSuit: trump, legalCards: legal, onTap: tap)
-                    .frame(width: geo.size.width, height: 180)
-            }
-            .frame(height: 180)
-
-            HStack(spacing: 8) {
-                TrickAreaView(trick: game.currentTrick, contract: game.contract, compact: true)
-                if !game.auction.isEmpty && showAuction {
-                    AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
-                        .frame(maxWidth: 150, maxHeight: .infinity)
-                }
-            }
-        }
     }
 
     @ViewBuilder

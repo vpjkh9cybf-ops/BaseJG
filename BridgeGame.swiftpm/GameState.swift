@@ -6,6 +6,11 @@ enum RKCBFlavor: String, CaseIterable {
     case f0314 = "0314"   // 5♣ = 0 or 3 key cards, 5♦ = 1 or 4
 }
 
+enum ScoringMode: String, CaseIterable {
+    case rubber  = "Rubber"
+    case chicago = "Chicago"
+}
+
 enum GamePhase: Equatable {
     case menu
     case bidding
@@ -40,6 +45,7 @@ class GameState: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var aiThinking: Bool = false
     @Published var claimDenied: Bool = false
+    @Published var scoringMode: ScoringMode = .rubber
 
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
@@ -155,7 +161,7 @@ class GameState: ObservableObject {
     // MARK: - Public Actions
 
     func startNewRubber() {
-        rubberScore.reset()
+        rubberScore.reset(mode: scoringMode)
         dealer = .north
         vulnerability = .neither
         startNewHand()
@@ -287,10 +293,10 @@ class GameState: ObservableObject {
         guard let c = buildContract() else { return }
         contract = c
         dummy    = c.declarer.partner
-        statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.prev.name) leads"
+        statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.next.name) leads"
 
         phase = .playing
-        currentTrick = Trick(leader: c.declarer.prev, plays: [], trump: c.strain.suit)
+        currentTrick = Trick(leader: c.declarer.next, plays: [], trump: c.strain.suit)
         triggerAIIfNeeded()
     }
 
@@ -343,7 +349,8 @@ class GameState: ObservableObject {
         guard let c = contract else { return }
         let tricks = c.declarer.isNorthSouth ? nsTricks : ewTricks
         let result = HandResult(contract: c, declarer: c.declarer,
-                                tricksWon: tricks, vulnerability: vulnerability)
+                                tricksWon: tricks, vulnerability: vulnerability,
+                                scoringMode: scoringMode)
         rubberScore.recordHand(result)
         phase = .handResult(made: result.made, tricks: tricks, score: abs(result.netScore))
     }

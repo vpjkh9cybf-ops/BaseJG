@@ -23,40 +23,60 @@ struct ScorePadView: View {
 
             Divider()
 
-            // Above the line
-            HStack(spacing: 0) {
-                Text("\(game.rubberScore.nsAbove)")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity)
+            if game.scoringMode == .chicago {
+                // Chicago: show total scores and hand count
+                HStack(spacing: 0) {
+                    Text("\(game.rubberScore.nsBelow)")
+                        .font(.callout.bold())
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    Text("\(game.rubberScore.ewBelow)")
+                        .font(.callout.bold())
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(height: 28)
+
                 Divider()
-                Text("\(game.rubberScore.ewAbove)")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity)
-            }
-            .frame(height: 22)
 
-            // Games won
-            HStack(spacing: 0) {
-                gameDotsView(count: game.rubberScore.nsGames)
+                Text("Hand \(game.rubberScore.handHistory.count)/4")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 2)
+            } else {
+                // Rubber: show above-the-line, game dots, partials below
+                HStack(spacing: 0) {
+                    Text("\(game.rubberScore.nsAbove)")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    Text("\(game.rubberScore.ewAbove)")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(height: 22)
+
+                HStack(spacing: 0) {
+                    gameDotsView(count: game.rubberScore.nsGames)
+                    Divider()
+                    gameDotsView(count: game.rubberScore.ewGames)
+                }
+
+                Divider().background(Color.black)
+
+                // Below the line — show partials (progress toward current game)
+                HStack(spacing: 0) {
+                    Text("\(game.rubberScore.nsPartial)")
+                        .font(.callout.bold())
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                    Text("\(game.rubberScore.ewPartial)")
+                        .font(.callout.bold())
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(height: 28)
+
                 Divider()
-                gameDotsView(count: game.rubberScore.ewGames)
             }
-
-            Divider().background(Color.black)
-
-            // Below the line
-            HStack(spacing: 0) {
-                Text("\(game.rubberScore.nsBelow)")
-                    .font(.callout.bold())
-                    .frame(maxWidth: .infinity)
-                Divider()
-                Text("\(game.rubberScore.ewBelow)")
-                    .font(.callout.bold())
-                    .frame(maxWidth: .infinity)
-            }
-            .frame(height: 28)
-
-            Divider()
 
             // Vulnerability indicator
             Text("Vul: \(game.vulnerability.rawValue)")
@@ -129,13 +149,13 @@ struct HandResultView: View {
                     VStack {
                         Text("N-S")
                             .font(.caption.bold())
-                        Text("\(game.rubberScore.nsAbove) / \(game.rubberScore.nsBelow)")
+                        Text("\(game.rubberScore.nsTotal)")
                             .font(.caption)
                     }
                     VStack {
                         Text("E-W")
                             .font(.caption.bold())
-                        Text("\(game.rubberScore.ewAbove) / \(game.rubberScore.ewBelow)")
+                        Text("\(game.rubberScore.ewTotal)")
                             .font(.caption)
                     }
                 }
@@ -162,19 +182,21 @@ struct HandResultView: View {
 struct RubberCompleteView: View {
     @EnvironmentObject var game: GameState
 
-    var nsTotal: Int { game.rubberScore.nsAbove + game.rubberScore.nsBelow }
-    var ewTotal: Int { game.rubberScore.ewAbove + game.rubberScore.ewBelow }
+    var nsTotal: Int { game.rubberScore.nsTotal }
+    var ewTotal: Int { game.rubberScore.ewTotal }
 
     var winner: String {
         nsTotal > ewTotal ? "North-South" : "East-West"
     }
+
+    var isChicago: Bool { game.scoringMode == .chicago }
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.55).ignoresSafeArea()
 
             VStack(spacing: 20) {
-                Text("Rubber Complete!")
+                Text(isChicago ? "Chicago Complete!" : "Rubber Complete!")
                     .font(.largeTitle.bold())
 
                 Text("\(winner) wins!")
@@ -182,11 +204,18 @@ struct RubberCompleteView: View {
                     .foregroundColor(.blue)
 
                 HStack(spacing: 32) {
-                    scoreColumn(title: "N-S", above: game.rubberScore.nsAbove, below: game.rubberScore.nsBelow, total: nsTotal)
-                    scoreColumn(title: "E-W", above: game.rubberScore.ewAbove, below: game.rubberScore.ewBelow, total: ewTotal)
+                    if isChicago {
+                        scoreColumn(title: "N-S", total: nsTotal, isChicago: true)
+                        scoreColumn(title: "E-W", total: ewTotal, isChicago: true)
+                    } else {
+                        scoreColumn(title: "N-S", above: game.rubberScore.nsAbove,
+                                    below: game.rubberScore.nsBelow, total: nsTotal, isChicago: false)
+                        scoreColumn(title: "E-W", above: game.rubberScore.ewAbove,
+                                    below: game.rubberScore.ewBelow, total: ewTotal, isChicago: false)
+                    }
                 }
 
-                Button("New Rubber") {
+                Button(isChicago ? "New Chicago" : "New Rubber") {
                     game.startNewRubberAfterCompletion()
                 }
                 .buttonStyle(.borderedProminent)
@@ -200,12 +229,14 @@ struct RubberCompleteView: View {
         }
     }
 
-    private func scoreColumn(title: String, above: Int, below: Int, total: Int) -> some View {
+    private func scoreColumn(title: String, above: Int = 0, below: Int = 0, total: Int, isChicago: Bool) -> some View {
         VStack(spacing: 6) {
             Text(title).font(.headline)
-            Text("Above: \(above)").font(.caption)
-            Text("Below: \(below)").font(.caption)
-            Divider()
+            if !isChicago {
+                Text("Above: \(above)").font(.caption)
+                Text("Below: \(below)").font(.caption)
+                Divider()
+            }
             Text("Total: \(total)").font(.callout.bold())
         }
         .frame(minWidth: 90)

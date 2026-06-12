@@ -19,30 +19,49 @@ struct ContentView: View {
 struct MenuView: View {
     @EnvironmentObject var game: GameState
 
+    private var startTitle: String {
+        game.scoringMode == .chicago ? "New Chicago" : "New Rubber"
+    }
+
     var body: some View {
         ZStack {
             Color(red: 0.08, green: 0.40, blue: 0.15)
                 .ignoresSafeArea()
 
-            VStack(spacing: 32) {
+            VStack(spacing: 28) {
                 VStack(spacing: 8) {
                     Text("♠ ♥ Bridge ♦ ♣")
                         .font(.system(size: 42, weight: .bold, design: .serif))
                         .foregroundColor(.white)
 
-                    Text("Standard American · Rubber Bridge")
+                    Text("Standard American · SAYC · RKCB")
                         .font(.callout)
                         .foregroundColor(.white.opacity(0.7))
                 }
 
-                VStack(spacing: 16) {
-                    MenuButton(title: "New Rubber", icon: "suit.spade.fill") {
-                        game.startNewRubber()
+                // Scoring mode picker
+                VStack(spacing: 8) {
+                    Text("Scoring")
+                        .font(.caption.bold())
+                        .foregroundColor(.white.opacity(0.6))
+                    Picker("Scoring Mode", selection: $game.scoringMode) {
+                        ForEach(ScoringMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                    Text(game.scoringMode == .chicago
+                         ? "4 deals · fixed vulnerability · game bonus per hand"
+                         : "2 games to win · points accumulate across hands")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .frame(width: 240)
+                }
 
-                    MenuButton(title: "Continue", icon: "arrow.right.circle.fill", disabled: true) {
-                        // Future: resume saved game
-                    }
+                MenuButton(title: startTitle, icon: "suit.spade.fill") {
+                    game.startNewRubber()
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -51,16 +70,15 @@ struct MenuView: View {
                         .foregroundColor(.white.opacity(0.6))
                     ForEach([
                         "Stayman", "Jacoby Transfers",
-                        "Jacoby 2NT", "Blackwood",
+                        "Jacoby 2NT", "RKCB (1430 / 0314)",
                         "Weak 2 openings", "Negative Doubles",
-                        "2/1 Game Force", "Limit Raises"
+                        "2/1 Game Force", "Splinters", "Drury"
                     ], id: \.self) { conv in
                         Text("• \(conv)")
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.55))
                     }
                 }
-                .padding(.top, 8)
             }
             .padding(40)
         }
