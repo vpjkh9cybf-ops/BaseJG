@@ -4,6 +4,9 @@ import SwiftUI
 struct ScorePadView: View {
     @EnvironmentObject var game: GameState
 
+    private var isChicago: Bool { game.scoringMode == .chicago }
+    private var handCount: Int  { game.rubberScore.handHistory.count }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("Score")
@@ -23,8 +26,8 @@ struct ScorePadView: View {
 
             Divider()
 
-            if game.scoringMode == .chicago {
-                // Chicago: show total scores and hand count
+            if isChicago {
+                // Chicago: running totals + hand counter
                 HStack(spacing: 0) {
                     Text("\(game.rubberScore.nsBelow)")
                         .font(.callout.bold())
@@ -36,14 +39,13 @@ struct ScorePadView: View {
                 }
                 .frame(height: 28)
 
-                Divider()
-
-                Text("Hand \(game.rubberScore.handHistory.count)/4")
+                Text("Hand \(min(handCount + 1, 4)) of 4")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.bottom, 2)
+
             } else {
-                // Rubber: show above-the-line, game dots, partials below
+                // Rubber: above line / game dots / partial below line
                 HStack(spacing: 0) {
                     Text("\(game.rubberScore.nsAbove)")
                         .font(.caption)
@@ -63,7 +65,7 @@ struct ScorePadView: View {
 
                 Divider().background(Color.black)
 
-                // Below the line — show partials (progress toward current game)
+                // Below the line: current partial toward next game
                 HStack(spacing: 0) {
                     Text("\(game.rubberScore.nsPartial)")
                         .font(.callout.bold())
@@ -76,13 +78,12 @@ struct ScorePadView: View {
                 .frame(height: 28)
 
                 Divider()
-            }
 
-            // Vulnerability indicator
-            Text("Vul: \(game.vulnerability.rawValue)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 4)
+                Text("Vul: \(game.vulnerability.rawValue)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 4)
+            }
         }
         .background(Color(.systemBackground))
         .cornerRadius(8)
@@ -144,19 +145,14 @@ struct HandResultView: View {
                     .font(.title3)
                     .foregroundColor(made ? .green : .red)
 
-                // Running score
                 HStack(spacing: 24) {
                     VStack {
-                        Text("N-S")
-                            .font(.caption.bold())
-                        Text("\(game.rubberScore.nsTotal)")
-                            .font(.caption)
+                        Text("N-S").font(.caption.bold())
+                        Text("\(game.rubberScore.nsTotal)").font(.caption)
                     }
                     VStack {
-                        Text("E-W")
-                            .font(.caption.bold())
-                        Text("\(game.rubberScore.ewTotal)")
-                            .font(.caption)
+                        Text("E-W").font(.caption.bold())
+                        Text("\(game.rubberScore.ewTotal)").font(.caption)
                     }
                 }
                 .padding(.horizontal)
@@ -182,14 +178,14 @@ struct HandResultView: View {
 struct RubberCompleteView: View {
     @EnvironmentObject var game: GameState
 
-    var nsTotal: Int { game.rubberScore.nsTotal }
-    var ewTotal: Int { game.rubberScore.ewTotal }
+    private var isChicago: Bool { game.scoringMode == .chicago }
+    private var nsTotal: Int { game.rubberScore.nsTotal }
+    private var ewTotal: Int { game.rubberScore.ewTotal }
 
-    var winner: String {
-        nsTotal > ewTotal ? "North-South" : "East-West"
+    private var winner: String {
+        if nsTotal == ewTotal { return "Tie" }
+        return nsTotal > ewTotal ? "North-South" : "East-West"
     }
-
-    var isChicago: Bool { game.scoringMode == .chicago }
 
     var body: some View {
         ZStack {
@@ -199,19 +195,23 @@ struct RubberCompleteView: View {
                 Text(isChicago ? "Chicago Complete!" : "Rubber Complete!")
                     .font(.largeTitle.bold())
 
-                Text("\(winner) wins!")
+                Text(nsTotal == ewTotal ? "It's a tie!" : "\(winner) wins!")
                     .font(.title2)
                     .foregroundColor(.blue)
 
                 HStack(spacing: 32) {
                     if isChicago {
-                        scoreColumn(title: "N-S", total: nsTotal, isChicago: true)
-                        scoreColumn(title: "E-W", total: ewTotal, isChicago: true)
+                        chicagoColumn(title: "N-S", total: nsTotal)
+                        chicagoColumn(title: "E-W", total: ewTotal)
                     } else {
-                        scoreColumn(title: "N-S", above: game.rubberScore.nsAbove,
-                                    below: game.rubberScore.nsBelow, total: nsTotal, isChicago: false)
-                        scoreColumn(title: "E-W", above: game.rubberScore.ewAbove,
-                                    below: game.rubberScore.ewBelow, total: ewTotal, isChicago: false)
+                        rubberColumn(title: "N-S",
+                                     above: game.rubberScore.nsAbove,
+                                     below: game.rubberScore.nsBelow,
+                                     total: nsTotal)
+                        rubberColumn(title: "E-W",
+                                     above: game.rubberScore.ewAbove,
+                                     below: game.rubberScore.ewBelow,
+                                     total: ewTotal)
                     }
                 }
 
@@ -229,15 +229,24 @@ struct RubberCompleteView: View {
         }
     }
 
-    private func scoreColumn(title: String, above: Int = 0, below: Int = 0, total: Int, isChicago: Bool) -> some View {
+    private func rubberColumn(title: String, above: Int, below: Int, total: Int) -> some View {
         VStack(spacing: 6) {
             Text(title).font(.headline)
-            if !isChicago {
-                Text("Above: \(above)").font(.caption)
-                Text("Below: \(below)").font(.caption)
-                Divider()
-            }
+            Text("Above: \(above)").font(.caption)
+            Text("Below: \(below)").font(.caption)
+            Divider()
             Text("Total: \(total)").font(.callout.bold())
+        }
+        .frame(minWidth: 90)
+        .padding(10)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(8)
+    }
+
+    private func chicagoColumn(title: String, total: Int) -> some View {
+        VStack(spacing: 6) {
+            Text(title).font(.headline)
+            Text("Total: \(total)").font(.title3.bold())
         }
         .frame(minWidth: 90)
         .padding(10)
