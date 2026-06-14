@@ -125,6 +125,8 @@ class GameState: ObservableObject {
             if switchSeatsForDeclarer && c.declarer == humanSeat.partner {
                 return (cp == c.declarer || cp == dummy) && !aiThinking
             }
+            // North is declarer, South is dummy — AI handles both; human watches
+            if c.declarer == humanSeat.partner { return false }
             return cp == humanSeat && !aiThinking
         default:
             return false
@@ -143,6 +145,8 @@ class GameState: ObservableObject {
             if cp == c.declarer || cp == dummy { return cp }
             return nil
         }
+        // North is declarer, South is dummy — AI handles both; human watches
+        if c.declarer == humanSeat.partner { return nil }
         return cp == humanSeat ? humanSeat : nil
     }
 
@@ -273,7 +277,8 @@ class GameState: ObservableObject {
                                           auction: snapshot, vulnerability: vul,
                                           rkcbFlavor: flavor)
             self.aiThinking = false
-            self.auction.append(AuctionEntry(seat: bidder, bid: bid))
+            let safeBid = self.legalBids.contains(bid) ? bid : .pass
+            self.auction.append(AuctionEntry(seat: bidder, bid: safeBid))
             if self.biddingIsComplete { self.finalizeBidding() }
             else { self.triggerAIIfNeeded() }
         }

@@ -663,13 +663,14 @@ struct BiddingAI {
             let prLevel = partnerRebidBid.level
             let prStrain = partnerRebidBid.strain
 
+            let highest = ctx.highestCurrentBid ?? .contract(.one, .clubs)
             // Partner raised my 2/1 suit
             if prStrain == myResp.strain {
-                if eval.length(mySuit) >= 5 {
-                    let game4 = Bid.contract(.four, myResp.strain!)
-                    return game4
-                }
-                return .contract(.three, .notrump)
+                let game4 = Bid.contract(.four, myResp.strain!)
+                if eval.length(mySuit) >= 5 && game4.isHigherThan(highest) { return game4 }
+                let threeNT = Bid.contract(.three, .notrump)
+                if threeNT.isHigherThan(highest) { return threeNT }
+                return .pass
             }
             // Partner rebid own major at 3-level
             if prStrain?.isMajor == true, let prSuit = prStrain?.suit, let prLvl = prLevel,
@@ -687,9 +688,10 @@ struct BiddingAI {
             if hcp >= 13 {
                 if eval.length(mySuit) >= 5 {
                     let game4 = Bid.contract(.four, myResp.strain!)
-                    if game4.isHigherThan(partnerRebidBid) { return game4 }
+                    if game4.isHigherThan(highest) { return game4 }
                 }
-                return .contract(.three, .notrump)
+                let threeNT = Bid.contract(.three, .notrump)
+                if threeNT.isHigherThan(highest) { return threeNT }
             }
         }
 

@@ -215,7 +215,9 @@ struct GameTableView: View {
     private func isNorthFaceUp() -> Bool {
         guard game.phase == .playing else { return false }
         if game.dummy == .north { return dummyRevealed }
-        if isNorthWideDeclarer   { return true }
+        // When North is declarer and human (South) is dummy, reveal North's hand after opening lead
+        if game.contract?.declarer == .north && !game.switchSeatsForDeclarer { return dummyRevealed }
+        if isNorthWideDeclarer { return true }
         return false
     }
 
