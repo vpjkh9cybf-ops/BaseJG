@@ -46,6 +46,7 @@ class GameState: ObservableObject {
     @Published var aiThinking: Bool = false
     @Published var claimDenied: Bool = false
     @Published var scoringMode: ScoringMode = .rubber
+    @Published var biddingNote: String = ""
 
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
@@ -186,6 +187,7 @@ class GameState: ObservableObject {
         nsTricks        = 0
         ewTricks        = 0
         aiThinking      = false
+        biddingNote     = ""
 
         statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
         phase = .bidding
@@ -194,6 +196,7 @@ class GameState: ObservableObject {
 
     func placeBid(_ bid: Bid) {
         guard phase == .bidding, !aiThinking, legalBids.contains(bid) else { return }
+        biddingNote = ""
         auction.append(AuctionEntry(seat: currentBidder, bid: bid))
         if biddingIsComplete { finalizeBidding() }
         else { triggerAIIfNeeded() }
@@ -278,6 +281,7 @@ class GameState: ObservableObject {
                                           rkcbFlavor: flavor)
             self.aiThinking = false
             let safeBid = self.legalBids.contains(bid) ? bid : .pass
+            self.biddingNote = BiddingAI.bidNote(bid: safeBid, seat: bidder, auction: snapshot)
             self.auction.append(AuctionEntry(seat: bidder, bid: safeBid))
             if self.biddingIsComplete { self.finalizeBidding() }
             else { self.triggerAIIfNeeded() }

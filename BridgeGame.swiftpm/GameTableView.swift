@@ -380,6 +380,23 @@ struct GameTableView: View {
                         BiddingBoxView()
                     }
                 }
+
+                if !game.biddingNote.isEmpty {
+                    Text(game.biddingNote)
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground).opacity(0.95))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.blue.opacity(0.4), lineWidth: 0.5)
+                        )
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.2), value: game.biddingNote)
+                }
             }
         } else if game.phase == .playing {
             VStack(spacing: 4) {

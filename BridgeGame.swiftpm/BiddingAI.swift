@@ -985,4 +985,190 @@ struct BiddingAI {
         }
         return .pass
     }
+
+    // MARK: - Bid Explanation
+
+    static func bidNote(bid: Bid, seat: Seat, auction: [(seat: Seat, bid: Bid)]) -> String {
+        if bid == .pass { return "" }
+        if bid == .redouble { return "Redouble: confident the contract can be made" }
+
+        let ctx = AuctionContext(seat: seat, auction: auction)
+
+        // Double
+        if bid == .double {
+            if ctx.myBids.isEmpty && ctx.partnerBids.allSatisfy({ $0.bid == .pass }) {
+                return "Takeout double: 12+ HCP, short in their suit, support for unbid suits"
+            }
+            if ctx.myBids.isEmpty && ctx.partnerLastContractBid != nil && !ctx.opponentIntervened {
+                return "Support double: exactly 3-card support for partner's suit"
+            }
+            return "Negative double: 6+ HCP, showing unbid major(s)"
+        }
+
+        guard let bidLevel = bid.level, let bidStrain = bid.strain else { return "" }
+
+        // ── Opening bids ──────────────────────────────────────────────────────
+        if ctx.isOpeningPosition {
+            switch (bidLevel, bidStrain) {
+            case (.one, .notrump): return "1NT opening: 15-17 HCP, balanced"
+            case (.two, .clubs):   return "Strong 2♣: 22+ HCP (or 20+ with long suit)"
+            case (.two, .notrump): return "2NT opening: 20-21 HCP, balanced"
+            case (.two, let s) where s != .clubs:
+                return "Weak 2\(s.display): 5-10 HCP, good 6-card \(s.display) suit"
+            case (.three, let s):
+                return "Preempt 3\(s.display): 4-9 HCP, 7-card \(s.display) suit"
+            default:
+                return "Opening: 12+ HCP, longest suit first"
+            }
+        }
+
+        // ── Responder's first bid ─────────────────────────────────────────────
+        if ctx.partnerOpenedCleanly,
+           let partnerOpen = ctx.partnerLastContractBid,
+           let openLevel = partnerOpen.level, let openStrain = partnerOpen.strain {
+
+            // After 1NT
+            if openLevel == .one && openStrain == .notrump {
+                switch bid {
+                case .contract(.two, .clubs):     return "Stayman: 8+ HCP, asking for 4-card major"
+                case .contract(.two, .diamonds):  return "Jacoby Transfer → ♥: 5+ hearts"
+                case .contract(.two, .hearts):    return "Jacoby Transfer → ♠: 5+ spades"
+                case .contract(.two, .notrump):   return "Invitational: 8-9 HCP, no 4-card major"
+                case .contract(.three, .notrump): return "3NT: 10-14 HCP, balanced — to play"
+                case .contract(.four, .notrump):  return "Quantitative 4NT: 15+ HCP, slam invite"
+                case .contract(.four, .hearts):   return "4♥: 6+ hearts, game values"
+                case .contract(.four, .spades):   return "4♠: 6+ spades, game values"
+                default: return ""
+                }
+            }
+
+            // After 2NT
+            if openLevel == .two && openStrain == .notrump {
+                switch bid {
+                case .contract(.three, .clubs):    return "Puppet Stayman: 4+ cards in a major"
+                case .contract(.three, .diamonds): return "Jacoby Transfer → ♥: 5+ hearts"
+                case .contract(.three, .hearts):   return "Jacoby Transfer → ♠: 5+ spades"
+                case .contract(.three, .notrump):  return "3NT: balanced, to play"
+                case .contract(.six, .notrump):    return "6NT: 10+ HCP, balanced slam"
+                default: return ""
+                }
+            }
+
+            // After 2♣
+            if openLevel == .two && openStrain == .clubs {
+                if bid == .contract(.two, .diamonds) { return "2♦ waiting: 0-7 HCP" }
+                if bid == .contract(.two, .notrump)  { return "2NT positive: 8+ HCP, balanced" }
+                return "Positive response to 2♣: 8+ HCP, 5-card \(bidStrain.display) suit"
+            }
+
+            // After weak 2
+            if openLevel == .two && openStrain.isMajor {
+                if bid == .contract(.two, .notrump) { return "Ogust 2NT: asking opener to describe strength/quality" }
+                if bidStrain == openStrain { return "Preemptive raise of \(openStrain.display) opening" }
+                return "Game try: 14+ HCP"
+            }
+
+            // After 1M
+            if openLevel == .one && openStrain.isMajor, let openSuit = openStrain.suit {
+                if bid == .contract(.two, .notrump) {
+                    return "Jacoby 2NT: 13+ HCP, 4+ \(openStrain.display) — game force"
+                }
+                if bid == .contract(.two, .clubs) {
+                    return "Reverse Drury: 3+ \(openStrain.display), limit raise (10-11 TP)"
+                }
+                if bid == .contract(.four, openStrain) {
+                    return "Game raise: 13+ TP, 3+ \(openStrain.display)"
+                }
+                if bid == .contract(.two, openStrain) {
+                    return "Simple raise: 6-9 HCP, 3+ \(openStrain.display)"
+                }
+                if bid == .contract(.three, openStrain) {
+                    return "Preemptive raise: 4+ \(openStrain.display), weak hand"
+                }
+                if bid == .contract(.four, .notrump) {
+                    return "RKCB (4NT): key card ask with \(openStrain.display) agreed"
+                }
+                if bid == .contract(.one, .notrump) {
+                    return "1NT: semi-forcing, 6-12 HCP, no \(openStrain.display) fit"
+                }
+                if bidLevel == .two && bidStrain != openStrain {
+                    return "2/1 Game Force: 13+ HCP, 5-card \(bidStrain.display)"
+                }
+                let splinterBids: [Bid] = openSuit == .hearts
+                    ? [.contract(.three, .spades), .contract(.four, .clubs), .contract(.four, .diamonds)]
+                    : [.contract(.four, .hearts), .contract(.four, .clubs), .contract(.four, .diamonds)]
+                if splinterBids.contains(bid) {
+                    return "Splinter: 4+ \(openStrain.display), singleton/void in \(bidStrain.display)"
+                }
+                if bidLevel == .one { return "New suit: 4+ \(bidStrain.display), 6+ HCP" }
+                return ""
+            }
+
+            // After 1m
+            if openLevel == .one && openStrain.isMinor {
+                if bidLevel == .one && bidStrain.isMajor {
+                    return "New major: 4+ \(bidStrain.display), 6+ HCP"
+                }
+                if bid == .contract(.one, .notrump)   { return "1NT: 6-9 HCP, no 4-card major" }
+                if bid == .contract(.two, .notrump)   { return "2NT: 10-12 HCP, balanced" }
+                if bid == .contract(.three, .notrump) { return "3NT: 13-15 HCP, balanced — to play" }
+                if bidStrain == openStrain { return "Minor raise: 5-card support" }
+                return ""
+            }
+        }
+
+        // ── Opener's rebid after Jacoby 2NT ───────────────────────────────────
+        if ctx.iRebidding,
+           let myOpen = ctx.myLastContractBid,
+           myOpen.level == .one, myOpen.strain?.isMajor == true,
+           let openStrain = myOpen.strain,
+           ctx.partnerLastContractBid == .contract(.two, .notrump) {
+            if bid == .contract(.four, openStrain) {
+                return "Jacoby 2NT reply: balanced minimum — sign off at game"
+            }
+            if bid == .contract(.three, openStrain) {
+                return "Jacoby 2NT reply: 6-card \(openStrain.display) suit"
+            }
+            if bidLevel == .three {
+                return "Jacoby 2NT reply: singleton in \(bidStrain.display)"
+            }
+            if bidLevel == .four && bidStrain != openStrain {
+                return "Jacoby 2NT reply: void in \(bidStrain.display)"
+            }
+            return ""
+        }
+
+        // ── RKCB key card response ────────────────────────────────────────────
+        if ctx.partnerAskedForAces && bidLevel == .five {
+            switch bidStrain {
+            case .clubs:    return "RKCB 5♣: 1 or 4 key cards (1430) / 0 or 3 (0314)"
+            case .diamonds: return "RKCB 5♦: 0 or 3 key cards (1430) / 1 or 4 (0314)"
+            case .hearts:   return "RKCB 5♥: 2 key cards, no queen of trump"
+            case .spades:   return "RKCB 5♠: 2 key cards + queen of trump"
+            default: return ""
+            }
+        }
+
+        // ── RKCB ask ──────────────────────────────────────────────────────────
+        if bid == .contract(.four, .notrump) {
+            return "RKCB (4NT): asking for key cards — 4 aces + king of agreed trump suit"
+        }
+
+        // ── Slam bids ─────────────────────────────────────────────────────────
+        if bidLevel == .six   { return "Small slam: contract for 12 of 13 tricks" }
+        if bidLevel == .seven { return "Grand slam: contract for all 13 tricks" }
+
+        // ── Competitive first bid ─────────────────────────────────────────────
+        if ctx.opponentIntervened && ctx.myBids.isEmpty {
+            if bidStrain == .notrump {
+                return "\(bidLevel.rawValue)NT overcall: 15-18 HCP, balanced, stopper in their suit"
+            }
+            if bidLevel.rawValue >= 3 {
+                return "Jump overcall: 5-10 HCP, 6-card \(bidStrain.display) suit — preemptive"
+            }
+            return "Overcall: 8+ HCP, 5-card \(bidStrain.display) suit"
+        }
+
+        return ""
+    }
 }
