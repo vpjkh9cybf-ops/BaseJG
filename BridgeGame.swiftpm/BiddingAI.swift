@@ -449,12 +449,21 @@ struct BiddingAI {
 
         // ── Jacoby 2NT (4+ fit, game force) ──────────────────────────────────
         if respLevel == .two && respStrain == .notrump {
-            for suit in Suit.allCases {
-                if suit != openSuit && eval.length(suit) <= 1 && hcp >= 15 {
+            // 6-card+ suit — show it first (most constructive)
+            if eval.length(openSuit) >= 6 { return .contract(.three, openStrain) }
+            // Singleton in side suit — show at 3-level
+            for suit in [Suit.clubs, .diamonds, .hearts, .spades] {
+                if suit != openSuit && eval.length(suit) == 1 {
                     return .contract(.three, suit.strain)
                 }
             }
-            if eval.length(openSuit) >= 6 && hcp >= 14 { return .contract(.three, openStrain) }
+            // Void in side suit — show at 4-level
+            for suit in [Suit.clubs, .diamonds, .hearts, .spades] {
+                if suit != openSuit && eval.length(suit) == 0 {
+                    return .contract(.four, suit.strain)
+                }
+            }
+            // Balanced / minimum — sign off at game
             return .contract(.four, openStrain)
         }
 
@@ -634,6 +643,22 @@ struct BiddingAI {
             // Partner denied major (2♦)
             if hcp >= 10 { return .contract(.three, .notrump) }
             if hcp >= 8  { return .contract(.two,   .notrump) }
+            return .pass
+        }
+
+        // ── After Jacoby 2NT (I bid 2NT = game force with major fit) ─────────
+        if myResp == .contract(.two, .notrump) {
+            guard let partnerOpenMajor = partnerFirstBid?.strain, partnerOpenMajor.isMajor else { return .pass }
+            // Opener signed off at 4M (minimum, balanced) — nowhere to go
+            if partnerRebidBid == .contract(.four, partnerOpenMajor) { return .pass }
+            // Opener showed extras (3-level feature or 4-minor void) — consider slam
+            if hcp >= 16 {
+                let bw = Bid.contract(.four, .notrump)
+                if bw.isHigherThan(partnerRebidBid) { return bw }
+            }
+            // Drive to game
+            let game = Bid.contract(.four, partnerOpenMajor)
+            if game.isHigherThan(partnerRebidBid) { return game }
             return .pass
         }
 
