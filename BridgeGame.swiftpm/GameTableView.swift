@@ -70,7 +70,7 @@ struct GameTableView: View {
                 HStack(alignment: .top, spacing: 0) {
                     // Score column — always visible on far left
                     scoreColumn
-                        .frame(width: 110)
+                        .frame(width: 145)
                         .frame(maxHeight: .infinity)
 
                     // Main play area
@@ -79,13 +79,13 @@ struct GameTableView: View {
                             .frame(height: geo.size.height * northRatio)
 
                         HStack(alignment: .center, spacing: 0) {
-                            let mainW = geo.size.width - 110
+                            let mainW = geo.size.width - 145
                             let westW = game.dummy == .west && ewDummyRevealed
-                                ? mainW * 0.33
-                                : ewDummyRevealed ? mainW * 0.13 : mainW * 0.20
+                                ? mainW * 0.40
+                                : ewDummyRevealed ? mainW * 0.10 : mainW * 0.20
                             let eastW = game.dummy == .east && ewDummyRevealed
-                                ? mainW * 0.33
-                                : ewDummyRevealed ? mainW * 0.13 : mainW * 0.20
+                                ? mainW * 0.40
+                                : ewDummyRevealed ? mainW * 0.10 : mainW * 0.20
                             westArea.frame(width: westW)
                             centerArea.frame(maxWidth: .infinity)
                             eastArea.frame(width: eastW)
@@ -127,12 +127,28 @@ struct GameTableView: View {
         } message: {
             Text("The opponents still hold winning cards. You cannot claim all remaining tricks.")
         }
+        .alert(game.practiceFeedbackIsCorrect ? "Correct!" : "Convention Practice",
+               isPresented: $game.showPracticeFeedback) {
+            Button("Continue") { }
+            if !game.practiceFeedbackIsCorrect {
+                Button("Next Hand") { game.nextPracticeHand() }
+            }
+        } message: {
+            Text(game.practiceFeedbackMessage)
+        }
     }
 
     // MARK: - Score column (far left)
 
     private var scoreColumn: some View {
         VStack(spacing: 6) {
+            if let convention = game.practiceConvention {
+                Text("Practice:\n\(convention.rawValue)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.yellow)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 4)
+            }
             ScorePadView()
 
             if !isBiddingPhase, let c = game.contract {
@@ -379,6 +395,17 @@ struct GameTableView: View {
                     if game.isHumanTurn {
                         BiddingBoxView()
                     }
+                }
+
+                if !game.practiceHint.isEmpty {
+                    Text(game.practiceHint)
+                        .font(.caption2)
+                        .foregroundColor(.yellow)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(8)
                 }
 
                 if !game.biddingNote.isEmpty {

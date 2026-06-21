@@ -47,6 +47,11 @@ class GameState: ObservableObject {
     @Published var claimDenied: Bool = false
     @Published var scoringMode: ScoringMode = .rubber
     @Published var biddingNote: String = ""
+    @Published var practiceConvention: PracticeConvention? = nil
+    @Published var showPracticeFeedback: Bool = false
+    @Published var practiceFeedbackMessage: String = ""
+    @Published var practiceFeedbackIsCorrect: Bool = false
+    @Published var practiceHint: String = ""
 
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
@@ -166,6 +171,9 @@ class GameState: ObservableObject {
     // MARK: - Public Actions
 
     func startNewRubber() {
+        practiceConvention = nil
+        practiceHint = ""
+        showPracticeFeedback = false
         rubberScore.reset(mode: scoringMode)
         dealer = .north
         vulnerability = .neither
@@ -188,6 +196,7 @@ class GameState: ObservableObject {
         ewTricks        = 0
         aiThinking      = false
         biddingNote     = ""
+        practiceHint    = ""
 
         statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
         phase = .bidding
@@ -197,6 +206,24 @@ class GameState: ObservableObject {
     func placeBid(_ bid: Bid) {
         guard phase == .bidding, !aiThinking, legalBids.contains(bid) else { return }
         biddingNote = ""
+
+        // Convention practice: check South's critical bid
+        if currentBidder == humanSeat, let convention = practiceConvention {
+            if let expected = convention.expectedBid(auction: auction, southHand: hands[humanSeat] ?? []) {
+                if bid == expected {
+                    practiceFeedbackMessage = "✓ Correct! \(bid.display) — \(convention.rawValue) bid confirmed."
+                    practiceFeedbackIsCorrect = true
+                } else {
+                    practiceFeedbackMessage = convention.correctionText(expected: expected,
+                                                                       southHand: hands[humanSeat] ?? [],
+                                                                       auction: auction)
+                    practiceFeedbackIsCorrect = false
+                }
+                showPracticeFeedback = true
+            }
+            practiceHint = ""
+        }
+
         auction.append(AuctionEntry(seat: currentBidder, bid: bid))
         if biddingIsComplete { finalizeBidding() }
         else { triggerAIIfNeeded() }
@@ -241,12 +268,61 @@ class GameState: ObservableObject {
             phase = .rubberComplete
         } else {
             vulnerability = rubberScore.currentVulnerability
-            startNewHand()
+            if practiceConvention != nil {
+                dealer = practiceConvention!.dealerSeat
+                dealForConvention()
+            } else {
+                startNewHand()
+            }
         }
     }
 
     func startNewRubberAfterCompletion() {
-        startNewRubber()
+        if let convention = practiceConvention {
+            startPractice(convention: convention)
+        } else {
+            startNewRubber()
+        }
+    }
+
+    func startPractice(convention: PracticeConvention) {
+        practiceConvention = convention
+        rubberScore.reset(mode: .rubber)
+        vulnerability = .neither
+        dealer = convention.dealerSeat
+        dealForConvention()
+    }
+
+    func nextPracticeHand() {
+        guard let convention = practiceConvention else { return }
+        dealer = convention.dealerSeat
+        dealForConvention()
+    }
+
+    private func dealForConvention() {
+        guard let convention = practiceConvention else { startNewHand(); return }
+        for _ in 0..<40 {
+            let deck = Card.fullDeck
+            let north = Array(deck[0..<13]).sorted(by: sortCards)
+            let east  = Array(deck[13..<26]).sorted(by: sortCards)
+            let south = Array(deck[26..<39]).sorted(by: sortCards)
+            let west  = Array(deck[39..<52]).sorted(by: sortCards)
+            if convention.northQualifies(north) && convention.southQualifies(south, north: north) {
+                hands[.north] = north
+                hands[.east]  = east
+                hands[.south] = south
+                hands[.west]  = west
+                auction = []; completedTricks = []; currentTrick = nil
+                contract = nil; dummy = nil; nsTricks = 0; ewTricks = 0
+                aiThinking = false; biddingNote = ""; practiceHint = ""
+                showPracticeFeedback = false
+                statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
+                phase = .bidding
+                triggerAIIfNeeded()
+                return
+            }
+        }
+        startNewHand()
     }
 
     // MARK: - Private
@@ -283,8 +359,23 @@ class GameState: ObservableObject {
             let safeBid = self.legalBids.contains(bid) ? bid : .pass
             self.biddingNote = BiddingAI.bidNote(bid: safeBid, seat: bidder, auction: snapshot)
             self.auction.append(AuctionEntry(seat: bidder, bid: safeBid))
+            self.updatePracticeHint()
             if self.biddingIsComplete { self.finalizeBidding() }
             else { self.triggerAIIfNeeded() }
+        }
+    }
+
+    private func updatePracticeHint() {
+        guard let convention = practiceConvention else { practiceHint = ""; return }
+        // Only show hint when it's South's turn in the bidding phase
+        if phase == .bidding && currentBidder == humanSeat {
+            if let _ = convention.expectedBid(auction: auction, southHand: hands[humanSeat] ?? []) {
+                practiceHint = convention.hintText(southHand: hands[humanSeat] ?? [], auction: auction)
+            } else {
+                practiceHint = ""
+            }
+        } else {
+            practiceHint = ""
         }
     }
 

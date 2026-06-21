@@ -18,6 +18,7 @@ struct ContentView: View {
 
 struct MenuView: View {
     @EnvironmentObject var game: GameState
+    @State private var showConventionPicker = false
 
     private var startTitle: String {
         game.scoringMode == .chicago ? "New Chicago" : "New Rubber"
@@ -64,6 +65,10 @@ struct MenuView: View {
                     game.startNewRubber()
                 }
 
+                MenuButton(title: "Convention Practice", icon: "graduationcap.fill") {
+                    showConventionPicker = true
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Conventions included:")
                         .font(.caption.bold())
@@ -81,6 +86,41 @@ struct MenuView: View {
                 }
             }
             .padding(40)
+        }
+        .sheet(isPresented: $showConventionPicker) { ConventionPickerView() }
+    }
+}
+
+struct ConventionPickerView: View {
+    @EnvironmentObject var game: GameState
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationView {
+            List(PracticeConvention.allCases) { convention in
+                Button {
+                    dismiss()
+                    game.startPractice(convention: convention)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(convention.rawValue)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text(convention.subtitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .navigationTitle("Convention Practice")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
         }
     }
 }

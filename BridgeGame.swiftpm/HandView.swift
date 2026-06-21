@@ -97,7 +97,7 @@ struct HandView: View {
                         .font(isSmall ? .caption : .callout)
                         .frame(width: isSmall ? 14 : 18, alignment: .leading)
 
-                    HStack(spacing: isSmall ? -4 : -6) {
+                    HStack(spacing: isSmall ? -4 : isMedium ? -10 : -6) {
                         ForEach(suitCards) { card in
                             let isLegal = legalCards.contains(card)
                             if onTap != nil {

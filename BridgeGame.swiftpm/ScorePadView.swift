@@ -7,6 +7,41 @@ struct ScorePadView: View {
     private var isChicago: Bool { game.scoringMode == .chicago }
     private var handCount: Int  { game.rubberScore.handHistory.count }
 
+    // Above-line entries: (ns, ew) per hand — only non-zero entries
+    private var aboveEntries: [(ns: Int, ew: Int)] {
+        game.rubberScore.handHistory.compactMap { hr in
+            guard hr.scoringMode == .rubber else { return nil }
+            if hr.made {
+                let above = abs(hr.netScore) - hr.belowLineScore
+                guard above > 0 else { return nil }
+                return hr.declarerIsNS ? (above, 0) : (0, above)
+            } else {
+                let penalty = abs(hr.netScore)
+                return hr.declarerIsNS ? (0, penalty) : (penalty, 0)
+            }
+        }
+    }
+
+    // Below-line entries grouped by game (each inner array is one game's hands)
+    // Last inner array is the current in-progress game
+    private var belowGames: [[(ns: Int, ew: Int)]] {
+        var result: [[(ns: Int, ew: Int)]] = [[]]
+        var nsAcc = 0, ewAcc = 0
+        for hr in game.rubberScore.handHistory where hr.scoringMode == .rubber && hr.made {
+            let b = hr.belowLineScore
+            if hr.declarerIsNS {
+                result[result.count - 1].append((b, 0))
+                nsAcc += b
+                if nsAcc >= 100 { nsAcc = 0; ewAcc = 0; result.append([]) }
+            } else {
+                result[result.count - 1].append((0, b))
+                ewAcc += b
+                if ewAcc >= 100 { nsAcc = 0; ewAcc = 0; result.append([]) }
+            }
+        }
+        return result
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("Score")
@@ -45,42 +80,79 @@ struct ScorePadView: View {
                     .padding(.bottom, 2)
 
             } else {
-                // Rubber: above line / game dots / partial below line
-                HStack(spacing: 0) {
-                    Text("\(game.rubberScore.nsAbove)")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
-                    Divider()
-                    Text("\(game.rubberScore.ewAbove)")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
+                // Rubber: above-line entries
+                if aboveEntries.isEmpty {
+                    Spacer().frame(height: 18)
+                } else {
+                    ForEach(aboveEntries.indices, id: \.self) { i in
+                        HStack(spacing: 0) {
+                            Text(aboveEntries[i].ns > 0 ? "\(aboveEntries[i].ns)" : "")
+                                .font(.system(size: 9))
+                                .frame(maxWidth: .infinity)
+                            Divider()
+                            Text(aboveEntries[i].ew > 0 ? "\(aboveEntries[i].ew)" : "")
+                                .font(.system(size: 9))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .frame(height: 14)
+                    }
                 }
-                .frame(height: 22)
 
+                // The line
+                Rectangle().fill(Color.primary).frame(height: 2).padding(.horizontal, 2)
+
+                // Below-line entries by game
+                let games = belowGames
+                if games.allSatisfy({ $0.isEmpty }) {
+                    Spacer().frame(height: 18)
+                } else {
+                    ForEach(games.indices, id: \.self) { gi in
+                        if gi > 0 && !games[gi - 1].isEmpty {
+                            Divider().background(Color.primary)
+                        }
+                        ForEach(games[gi].indices, id: \.self) { hi in
+                            let e = games[gi][hi]
+                            HStack(spacing: 0) {
+                                Text(e.ns > 0 ? "\(e.ns)" : "")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(maxWidth: .infinity)
+                                Divider()
+                                Text(e.ew > 0 ? "\(e.ew)" : "")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .frame(height: 14)
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Game dots
                 HStack(spacing: 0) {
                     gameDotsView(count: game.rubberScore.nsGames)
                     Divider()
                     gameDotsView(count: game.rubberScore.ewGames)
                 }
 
-                Divider().background(Color.black)
+                Divider()
 
-                // Below the line: current partial toward next game
+                // Running totals
                 HStack(spacing: 0) {
-                    Text("\(game.rubberScore.nsPartial)")
-                        .font(.callout.bold())
+                    Text("\(game.rubberScore.nsAbove + game.rubberScore.nsBelow)")
+                        .font(.caption.bold())
                         .frame(maxWidth: .infinity)
                     Divider()
-                    Text("\(game.rubberScore.ewPartial)")
-                        .font(.callout.bold())
+                    Text("\(game.rubberScore.ewAbove + game.rubberScore.ewBelow)")
+                        .font(.caption.bold())
                         .frame(maxWidth: .infinity)
                 }
-                .frame(height: 28)
+                .frame(height: 18)
 
                 Divider()
 
                 Text("Vul: \(game.vulnerability.rawValue)")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.bottom, 4)
             }
@@ -91,7 +163,7 @@ struct ScorePadView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
         )
-        .frame(maxWidth: 140)
+        .frame(maxWidth: 145)
     }
 
     private func gameDotsView(count: Int) -> some View {
