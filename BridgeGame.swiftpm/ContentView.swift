@@ -87,7 +87,7 @@ struct MenuView: View {
             }
             .padding(40)
         }
-        .sheet(isPresented: $showConventionPicker) { ConventionPickerView() }
+        .sheet(isPresented: $showConventionPicker) { ConventionPickerView().environmentObject(game) }
     }
 }
 

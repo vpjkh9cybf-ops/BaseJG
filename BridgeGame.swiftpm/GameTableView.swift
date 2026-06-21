@@ -5,6 +5,7 @@ struct GameTableView: View {
     @EnvironmentObject var game: GameState
     @State private var showAuction: Bool = false
     @State private var showSettings: Bool = false
+    @State private var practiceAlertTitle: String = ""
 
     private var isBiddingPhase: Bool { game.phase == .bidding }
     private var trump: Suit? { game.contract?.strain.suit }
@@ -127,12 +128,14 @@ struct GameTableView: View {
         } message: {
             Text("The opponents still hold winning cards. You cannot claim all remaining tricks.")
         }
-        .alert(game.practiceFeedbackIsCorrect ? "Correct!" : "Convention Practice",
-               isPresented: $game.showPracticeFeedback) {
-            Button("Continue") { }
-            if !game.practiceFeedbackIsCorrect {
-                Button("Next Hand") { game.nextPracticeHand() }
+        .onChange(of: game.showPracticeFeedback) { showing in
+            if showing {
+                practiceAlertTitle = game.practiceFeedbackIsCorrect ? "Correct!" : "Convention Practice"
             }
+        }
+        .alert(practiceAlertTitle, isPresented: $game.showPracticeFeedback) {
+            Button("Next Hand") { game.nextPracticeHand() }
+            Button("Continue", role: .cancel) { }
         } message: {
             Text(game.practiceFeedbackMessage)
         }

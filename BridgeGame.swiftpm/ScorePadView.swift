@@ -84,47 +84,14 @@ struct ScorePadView: View {
                 if aboveEntries.isEmpty {
                     Spacer().frame(height: 18)
                 } else {
-                    ForEach(aboveEntries.indices, id: \.self) { i in
-                        HStack(spacing: 0) {
-                            Text(aboveEntries[i].ns > 0 ? "\(aboveEntries[i].ns)" : "")
-                                .font(.system(size: 9))
-                                .frame(maxWidth: .infinity)
-                            Divider()
-                            Text(aboveEntries[i].ew > 0 ? "\(aboveEntries[i].ew)" : "")
-                                .font(.system(size: 9))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .frame(height: 14)
-                    }
+                    aboveEntriesView
                 }
 
                 // The line
                 Rectangle().fill(Color.primary).frame(height: 2).padding(.horizontal, 2)
 
                 // Below-line entries by game
-                let games = belowGames
-                if games.allSatisfy({ $0.isEmpty }) {
-                    Spacer().frame(height: 18)
-                } else {
-                    ForEach(games.indices, id: \.self) { gi in
-                        if gi > 0 && !games[gi - 1].isEmpty {
-                            Divider().background(Color.primary)
-                        }
-                        ForEach(games[gi].indices, id: \.self) { hi in
-                            let e = games[gi][hi]
-                            HStack(spacing: 0) {
-                                Text(e.ns > 0 ? "\(e.ns)" : "")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .frame(maxWidth: .infinity)
-                                Divider()
-                                Text(e.ew > 0 ? "\(e.ew)" : "")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .frame(height: 14)
-                        }
-                    }
-                }
+                belowGamesView
 
                 Divider()
 
@@ -164,6 +131,49 @@ struct ScorePadView: View {
                 .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
         )
         .frame(maxWidth: 145)
+    }
+
+    private var aboveEntriesView: some View {
+        VStack(spacing: 0) {
+            ForEach(aboveEntries.indices, id: \.self) { i in
+                scoreRow(ns: aboveEntries[i].ns, ew: aboveEntries[i].ew, bold: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var belowGamesView: some View {
+        if belowGames.allSatisfy({ $0.isEmpty }) {
+            Spacer().frame(height: 18)
+        } else {
+            belowGamesContent(belowGames)
+        }
+    }
+
+    private func belowGamesContent(_ games: [[(ns: Int, ew: Int)]]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(games.indices, id: \.self) { gi in
+                if gi > 0 && !games[gi - 1].isEmpty {
+                    Rectangle().fill(Color.primary).frame(height: 0.5)
+                }
+                ForEach(games[gi].indices, id: \.self) { hi in
+                    scoreRow(ns: games[gi][hi].ns, ew: games[gi][hi].ew, bold: true)
+                }
+            }
+        }
+    }
+
+    private func scoreRow(ns: Int, ew: Int, bold: Bool) -> some View {
+        HStack(spacing: 0) {
+            Text(ns > 0 ? "\(ns)" : "")
+                .font(bold ? .system(size: 10, weight: .bold) : .system(size: 9))
+                .frame(maxWidth: .infinity)
+            Divider()
+            Text(ew > 0 ? "\(ew)" : "")
+                .font(bold ? .system(size: 10, weight: .bold) : .system(size: 9))
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: 14)
     }
 
     private func gameDotsView(count: Int) -> some View {
