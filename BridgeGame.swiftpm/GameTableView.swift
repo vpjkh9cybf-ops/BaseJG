@@ -78,7 +78,7 @@ struct GameTableView: View {
                         northArea
                             .frame(height: geo.size.height * northRatio)
 
-                        HStack(alignment: .center, spacing: 0) {
+                        HStack(alignment: .top, spacing: 0) {
                             let mainW = geo.size.width - 145
                             let westW = game.dummy == .west && ewDummyRevealed
                                 ? mainW * 0.40
@@ -91,6 +91,7 @@ struct GameTableView: View {
                             eastArea.frame(width: eastW)
                         }
                         .frame(height: geo.size.height * midRatio)
+                        .clipped()
 
                         southArea
                             .frame(height: geo.size.height * southRatio)
@@ -496,15 +497,15 @@ struct GameTableView: View {
         if !game.biddingNote.isEmpty && game.practiceHint.isEmpty {
             Text(game.biddingNote)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color(.secondarySystemBackground).opacity(0.90))
+                .background(Color.black.opacity(0.72))
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
                 )
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: game.biddingNote)

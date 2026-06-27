@@ -8,20 +8,20 @@ struct BiddingBoxView: View {
     private let levels: [BidLevel] = BidLevel.allCases
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 5) {
             // Pass / Double / Redouble
-            HStack(spacing: 10) {
+            HStack(spacing: 5) {
                 specialButton("Pass", color: .green, bid: .pass)
                 specialButton("X",    color: .red,   bid: .double)
                 specialButton("XX",   color: .purple, bid: .redouble)
             }
 
-            Divider()
+            Divider().padding(.vertical, 1)
 
             // 7 levels × 5 strains grid — all bids visible, illegal ones dimmed
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 ForEach(levels, id: \.rawValue) { level in
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         ForEach(strains, id: \.rawValue) { strain in
                             contractCell(level: level, strain: strain)
                         }
@@ -29,10 +29,10 @@ struct BiddingBoxView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(6)
         .background(Color(.systemBackground).opacity(0.97))
-        .cornerRadius(12)
-        .shadow(radius: 6)
+        .cornerRadius(10)
+        .shadow(radius: 4)
     }
 
     private func specialButton(_ label: String, color: Color, bid: Bid) -> some View {
@@ -41,12 +41,12 @@ struct BiddingBoxView: View {
             game.placeBid(bid)
         } label: {
             Text(label)
-                .font(.body.bold())
+                .font(.callout.bold())
                 .foregroundColor(enabled ? .white : .secondary)
-                .frame(minWidth: 72, minHeight: 48)
-                .padding(.horizontal, 8)
+                .frame(minWidth: 56, minHeight: 32)
+                .padding(.horizontal, 4)
                 .background(enabled ? color : Color(.systemFill))
-                .cornerRadius(8)
+                .cornerRadius(7)
         }
         .disabled(!enabled)
     }
@@ -57,19 +57,19 @@ struct BiddingBoxView: View {
         return Button {
             game.placeBid(bid)
         } label: {
-            VStack(spacing: 1) {
+            VStack(spacing: 0) {
                 Text("\(level.rawValue)")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundColor(legal ? .primary : Color.primary.opacity(0.18))
                 Text(strain.display)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(legal ? strain.color(alternate: game.conventionSettings.useAlternateColors) : Color.secondary.opacity(0.25))
             }
-            .frame(width: 54, height: 40)
+            .frame(width: 46, height: 34)
             .background(legal ? Color(.secondarySystemBackground) : Color.clear)
-            .cornerRadius(6)
+            .cornerRadius(5)
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 5)
                     .stroke(legal ? Color.gray.opacity(0.3) : Color.clear, lineWidth: 0.5)
             )
         }
