@@ -5,7 +5,6 @@ struct GameTableView: View {
     @EnvironmentObject var game: GameState
     @State private var showAuction: Bool = false
     @State private var showSettings: Bool = false
-    @State private var practiceAlertTitle: String = ""
 
     private var isBiddingPhase: Bool { game.phase == .bidding }
     private var trump: Suit? { game.contract?.strain.suit }
@@ -128,14 +127,16 @@ struct GameTableView: View {
         } message: {
             Text("The opponents still hold winning cards. You cannot claim all remaining tricks.")
         }
-        .onChange(of: game.showPracticeFeedback) { showing in
-            if showing {
-                practiceAlertTitle = game.practiceFeedbackIsCorrect ? "Correct!" : "Convention Practice"
-            }
-        }
-        .alert(practiceAlertTitle, isPresented: $game.showPracticeFeedback) {
+        .alert("Correct!", isPresented: $game.showCorrectPractice) {
             Button("Next Hand") { game.nextPracticeHand() }
-            Button("Continue", role: .cancel) { }
+            Button("OK", role: .cancel) { game.continuePracticeBid() }
+        } message: {
+            Text(game.practiceFeedbackMessage)
+        }
+        .alert("Convention Practice", isPresented: $game.showIncorrectPractice) {
+            Button("Next Hand") { game.nextPracticeHand() }
+            Button("Rebid") { game.rebidPracticeHand() }
+            Button("Continue Anyway", role: .cancel) { game.continuePracticeBid() }
         } message: {
             Text(game.practiceFeedbackMessage)
         }
@@ -161,6 +162,7 @@ struct GameTableView: View {
             if game.phase == .playing, let c = game.contract {
                 trickCountView(c)
                 claimButton
+                replayButtons
             }
 
             Spacer(minLength: 0)
@@ -227,6 +229,25 @@ struct GameTableView: View {
                 .cornerRadius(6)
         }
         .disabled(!game.canClaim())
+    }
+
+    private var replayButtons: some View {
+        VStack(spacing: 4) {
+            Button("↺ Rebid") { game.replayFromBidding() }
+                .font(.caption2.bold())
+                .foregroundColor(.white.opacity(0.65))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.08))
+                .cornerRadius(5)
+            Button("↺ Replay Play") { game.replayFromPlay() }
+                .font(.caption2.bold())
+                .foregroundColor(.white.opacity(0.65))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.08))
+                .cornerRadius(5)
+        }
     }
 
     // MARK: - North hand

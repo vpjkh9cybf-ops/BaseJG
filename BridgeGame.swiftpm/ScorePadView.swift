@@ -247,6 +247,15 @@ struct HandResultView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.top, 4)
+
+                HStack(spacing: 12) {
+                    Button("↺ Rebid") { game.replayFromBidding() }
+                        .font(.caption.bold())
+                    Button("↺ Replay Play") { game.replayFromPlay() }
+                        .font(.caption.bold())
+                }
+                .foregroundColor(.secondary)
+                .padding(.bottom, 4)
             }
             .padding(24)
             .background(Color(.systemBackground))

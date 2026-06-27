@@ -48,10 +48,18 @@ class GameState: ObservableObject {
     @Published var scoringMode: ScoringMode = .rubber
     @Published var biddingNote: String = ""
     @Published var practiceConvention: PracticeConvention? = nil
-    @Published var showPracticeFeedback: Bool = false
+    @Published var showCorrectPractice: Bool = false
+    @Published var showIncorrectPractice: Bool = false
     @Published var practiceFeedbackMessage: String = ""
-    @Published var practiceFeedbackIsCorrect: Bool = false
     @Published var practiceHint: String = ""
+
+    // Replay snapshots
+    private var dealtHands: [Seat: [Card]] = [:]
+    private var dealerAtDeal: Seat = .north
+    private var auctionSnapshot: [AuctionEntry] = []
+    private var contractSnapshot: Contract? = nil
+    private var dummySnapshot: Seat? = nil
+    private var pendingPracticeBid: Bid? = nil
 
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
@@ -177,7 +185,8 @@ class GameState: ObservableObject {
     func startNewRubber() {
         practiceConvention = nil
         practiceHint = ""
-        showPracticeFeedback = false
+        showCorrectPractice = false
+        showIncorrectPractice = false
         rubberScore.reset(mode: scoringMode)
         dealer = .north
         vulnerability = .neither
@@ -190,6 +199,8 @@ class GameState: ObservableObject {
         hands[.east]  = Array(deck[13..<26]).sorted(by: sortCards)
         hands[.south] = Array(deck[26..<39]).sorted(by: sortCards)
         hands[.west]  = Array(deck[39..<52]).sorted(by: sortCards)
+        dealtHands = hands
+        dealerAtDeal = dealer
 
         auction         = []
         completedTricks = []
@@ -198,10 +209,13 @@ class GameState: ObservableObject {
         dummy           = nil
         nsTricks        = 0
         ewTricks        = 0
-        aiThinking      = false
-        biddingNote     = ""
-        practiceHint    = ""
-        bidWarning      = nil
+        aiThinking          = false
+        biddingNote         = ""
+        practiceHint        = ""
+        bidWarning          = nil
+        pendingPracticeBid  = nil
+        showCorrectPractice = false
+        showIncorrectPractice = false
 
         statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
         phase = .bidding
@@ -212,24 +226,43 @@ class GameState: ObservableObject {
         guard phase == .bidding, !aiThinking, legalBids.contains(bid) else { return }
         biddingNote = ""
 
-        // Convention practice: check South's critical bid
+        // Convention practice: hold bid pending user acknowledgement
         if currentBidder == humanSeat, let convention = practiceConvention {
             if let expected = convention.expectedBid(auction: auction, southHand: hands[humanSeat] ?? []) {
+                practiceHint = ""
+                pendingPracticeBid = bid
                 if bid == expected {
                     practiceFeedbackMessage = "✓ Correct! \(bid.display) — \(convention.rawValue) bid confirmed."
-                    practiceFeedbackIsCorrect = true
+                    showCorrectPractice = true
                 } else {
                     practiceFeedbackMessage = convention.correctionText(expected: expected,
                                                                        southHand: hands[humanSeat] ?? [],
                                                                        auction: auction)
-                    practiceFeedbackIsCorrect = false
+                    showIncorrectPractice = true
                 }
-                showPracticeFeedback = true
+                return  // don't commit until user taps Continue or Rebid
             }
             practiceHint = ""
         }
 
-        // Run convention coach on human's bid
+        commitBid(bid)
+    }
+
+    // Commit the human's chosen bid (or pending practice bid) to the auction.
+    func continuePracticeBid() {
+        if let bid = pendingPracticeBid {
+            pendingPracticeBid = nil
+            commitBid(bid)
+        }
+    }
+
+    // Discard the pending practice bid so the human can retry.
+    func rebidPracticeHand() {
+        pendingPracticeBid = nil
+        updatePracticeHint()
+    }
+
+    private func commitBid(_ bid: Bid) {
         if currentBidder == humanSeat {
             bidWarning = ConventionCoach.analyze(
                 hand: hands[humanSeat] ?? [],
@@ -240,7 +273,6 @@ class GameState: ObservableObject {
         } else {
             bidWarning = nil
         }
-
         auction.append(AuctionEntry(seat: currentBidder, bid: bid))
         if biddingIsComplete { finalizeBidding() }
         else { triggerAIIfNeeded() }
@@ -312,8 +344,40 @@ class GameState: ObservableObject {
 
     func nextPracticeHand() {
         guard let convention = practiceConvention else { return }
+        pendingPracticeBid = nil
         dealer = convention.dealerSeat
         dealForConvention()
+    }
+
+    func replayFromBidding() {
+        guard !dealtHands.isEmpty else { return }
+        hands   = dealtHands
+        dealer  = dealerAtDeal
+        auction = []; completedTricks = []; currentTrick = nil
+        contract = nil; dummy = nil; nsTricks = 0; ewTricks = 0
+        aiThinking = false; biddingNote = ""; practiceHint = ""
+        bidWarning = nil; pendingPracticeBid = nil
+        showCorrectPractice = false; showIncorrectPractice = false
+        statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
+        phase = .bidding
+        triggerAIIfNeeded()
+    }
+
+    func replayFromPlay() {
+        guard let c = contractSnapshot, !dealtHands.isEmpty else { return }
+        hands            = dealtHands
+        auction          = auctionSnapshot
+        contract         = c
+        dummy            = dummySnapshot
+        completedTricks  = []
+        currentTrick     = Trick(leader: c.declarer.next, plays: [], trump: c.strain.suit)
+        nsTricks         = 0; ewTricks = 0
+        aiThinking       = false
+        bidWarning       = nil; pendingPracticeBid = nil
+        showCorrectPractice = false; showIncorrectPractice = false
+        statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.next.name) leads"
+        phase = .playing
+        triggerAIIfNeeded()
     }
 
     private func dealForConvention() {
@@ -329,10 +393,13 @@ class GameState: ObservableObject {
                 hands[.east]  = east
                 hands[.south] = south
                 hands[.west]  = west
+                dealtHands = hands
+                dealerAtDeal = dealer
                 auction = []; completedTricks = []; currentTrick = nil
                 contract = nil; dummy = nil; nsTricks = 0; ewTricks = 0
                 aiThinking = false; biddingNote = ""; practiceHint = ""
-                showPracticeFeedback = false
+                bidWarning = nil; pendingPracticeBid = nil
+                showCorrectPractice = false; showIncorrectPractice = false
                 statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
                 phase = .bidding
                 triggerAIIfNeeded()
@@ -411,6 +478,9 @@ class GameState: ObservableObject {
         guard let c = buildContract() else { return }
         contract = c
         dummy    = c.declarer.partner
+        auctionSnapshot  = auction
+        contractSnapshot = c
+        dummySnapshot    = dummy
         statusMessage = "\(c.declarer.name) plays \(c.display) — \(c.declarer.next.name) leads"
 
         phase = .playing
