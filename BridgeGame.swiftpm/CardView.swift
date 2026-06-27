@@ -2,6 +2,7 @@
 import SwiftUI
 
 struct CardView: View {
+    @EnvironmentObject var game: GameState
     let card: Card
     var isHighlighted: Bool = false
     var isSmall: Bool = false
@@ -55,7 +56,7 @@ struct CardView: View {
                 // Rank only at top, centered
                 Text(card.rank.display)
                     .font(rankFont)
-                    .foregroundColor(card.suit.color)
+                    .foregroundColor(card.suit.color(alternate: game.conventionSettings.useAlternateColors))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, isSmall ? 2 : isMedium ? 4 : 6)
                     .padding(.horizontal, isSmall ? 2 : 4)
@@ -65,7 +66,7 @@ struct CardView: View {
                 // Suit symbol centered
                 Text(card.suit.symbol)
                     .font(centerSuitFont)
-                    .foregroundColor(card.suit.color)
+                    .foregroundColor(card.suit.color(alternate: game.conventionSettings.useAlternateColors))
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 Spacer(minLength: 0)

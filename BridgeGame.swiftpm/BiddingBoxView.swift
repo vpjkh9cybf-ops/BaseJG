@@ -63,7 +63,7 @@ struct BiddingBoxView: View {
                     .foregroundColor(legal ? .primary : Color.primary.opacity(0.18))
                 Text(strain.display)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(legal ? strain.color : Color.secondary.opacity(0.25))
+                    .foregroundColor(legal ? strain.color(alternate: game.conventionSettings.useAlternateColors) : Color.secondary.opacity(0.25))
             }
             .frame(width: 54, height: 40)
             .background(legal ? Color(.secondarySystemBackground) : Color.clear)

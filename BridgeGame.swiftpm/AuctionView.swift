@@ -5,6 +5,7 @@ struct AuctionView: View {
     let auction: [AuctionEntry]
     let dealer: Seat
     let contract: Contract?
+    var alternateColors: Bool = false
 
     // Seat column order: W  N  E  S (clockwise from dealer)
     private let columns: [Seat] = [.west, .north, .east, .south]
@@ -84,7 +85,7 @@ struct AuctionView: View {
             color = .purple
         case .contract(let level, let strain):
             text  = "\(level.rawValue)\(strain.display)"
-            color = strain.color
+            color = strain.color(alternate: alternateColors)
         }
 
         return Text(text)

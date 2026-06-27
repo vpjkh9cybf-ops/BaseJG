@@ -22,12 +22,9 @@ enum Strain: Int, CaseIterable, Comparable, Hashable {
         }
     }
 
-    var color: Color {
-        switch self {
-        case .hearts, .diamonds: return .red
-        default: return .primary
-        }
-    }
+    var color: Color { suit?.color ?? .primary }
+
+    func color(alternate: Bool) -> Color { suit?.color(alternate: alternate) ?? .primary }
 
     var isMajor: Bool  { self == .hearts || self == .spades }
     var isMinor: Bool  { self == .clubs  || self == .diamonds }

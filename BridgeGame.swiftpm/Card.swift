@@ -24,7 +24,19 @@ enum Suit: Int, CaseIterable, Comparable, Hashable {
         }
     }
 
-    var color: Color { (self == .hearts || self == .diamonds) ? .red : .primary }
+    var color: Color { color(alternate: false) }
+
+    func color(alternate: Bool = false) -> Color {
+        if alternate {
+            switch self {
+            case .clubs:    return .blue
+            case .diamonds: return Color(red: 1.0, green: 0.5, blue: 0.0)
+            case .hearts:   return .red
+            case .spades:   return .primary
+            }
+        }
+        return (self == .hearts || self == .diamonds) ? .red : .primary
+    }
 
     var strain: Strain {
         Strain(rawValue: rawValue)!

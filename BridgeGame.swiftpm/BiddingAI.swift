@@ -448,22 +448,27 @@ struct BiddingAI {
         }
 
         // ── Jacoby 2NT (4+ fit, game force) ──────────────────────────────────
+        // Jacoby 2NT Response — SAYC rule:
+        // 4M = minimum balanced (12-14 HCP) or no extras
+        // 3-new-suit = singleton OR void in that suit (shortness)
+        // 4-new-suit = 5-card side suit
+        // 3M = 6-card trump suit
         if respLevel == .two && respStrain == .notrump {
-            // 6-card+ suit — show it first (most constructive)
+            // 3M — extra trump length (6+ cards)
             if eval.length(openSuit) >= 6 { return .contract(.three, openStrain) }
-            // Singleton in side suit — show at 3-level
-            for suit in [Suit.clubs, .diamonds, .hearts, .spades] {
-                if suit != openSuit && eval.length(suit) == 1 {
+            // 3-suit — shortness (singleton or void) in a side suit
+            for suit in [Suit.clubs, .diamonds, .hearts, .spades] where suit != openSuit {
+                if eval.length(suit) <= 1 {
                     return .contract(.three, suit.strain)
                 }
             }
-            // Void in side suit — show at 4-level
-            for suit in [Suit.clubs, .diamonds, .hearts, .spades] {
-                if suit != openSuit && eval.length(suit) == 0 {
+            // 4-suit (new) — 5-card side suit
+            for suit in [Suit.clubs, .diamonds, .hearts, .spades] where suit != openSuit {
+                if eval.length(suit) >= 5 {
                     return .contract(.four, suit.strain)
                 }
             }
-            // Balanced / minimum — sign off at game
+            // 4M — minimum or balanced
             return .contract(.four, openStrain)
         }
 

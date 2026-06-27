@@ -362,7 +362,8 @@ struct GameTableView: View {
             HStack(spacing: 6) {
                 centerContent
                 if !game.auction.isEmpty && !isBiddingPhase && showAuction {
-                    AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
+                    AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
+                                alternateColors: game.conventionSettings.useAlternateColors)
                         .frame(maxWidth: 175, maxHeight: .infinity)
                 }
             }
@@ -392,12 +393,19 @@ struct GameTableView: View {
                 // Auction always visible so South knows what was bid before their turn
                 HStack(alignment: .top, spacing: 8) {
                     if !game.auction.isEmpty {
-                        AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract)
+                        AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
+                                    alternateColors: game.conventionSettings.useAlternateColors)
                             .frame(minWidth: 160, maxWidth: 200, maxHeight: .infinity)
                     }
                     if game.isHumanTurn {
                         BiddingBoxView()
                     }
+                }
+
+                // Bid warning banner (non-blocking, advisory)
+                if let warning = game.bidWarning {
+                    BidWarningView(analysis: warning)
+                        .padding(.horizontal, 4)
                 }
 
                 if !game.practiceHint.isEmpty {

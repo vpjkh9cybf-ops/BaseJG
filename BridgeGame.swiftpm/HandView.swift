@@ -2,6 +2,7 @@
 import SwiftUI
 
 struct HandView: View {
+    @EnvironmentObject var game: GameState
     let cards: [Card]
     let faceDown: Bool
     let isSmall: Bool
@@ -93,7 +94,7 @@ struct HandView: View {
             ForEach(bySuit, id: \.0) { suit, suitCards in
                 HStack(spacing: 2) {
                     Text(suit.symbol)
-                        .foregroundColor(suit.color)
+                        .foregroundColor(suit.color(alternate: game.conventionSettings.useAlternateColors))
                         .font(isSmall ? .caption : .callout)
                         .frame(width: isSmall ? 14 : 18, alignment: .leading)
 
@@ -121,6 +122,7 @@ struct HandView: View {
 
 // Compact text-only hand for auction/result panels
 struct HandTextView: View {
+    @EnvironmentObject var game: GameState
     let cards: [Card]
 
     private var bySuit: [(Suit, [Card])] {
@@ -135,7 +137,7 @@ struct HandTextView: View {
             ForEach(bySuit, id: \.0) { suit, suitCards in
                 HStack(spacing: 3) {
                     Text(suit.symbol)
-                        .foregroundColor(suit.color)
+                        .foregroundColor(suit.color(alternate: game.conventionSettings.useAlternateColors))
                         .font(.caption)
                     Text(suitCards.map { $0.rank.display }.joined(separator: " "))
                         .font(.caption)

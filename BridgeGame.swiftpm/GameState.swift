@@ -56,6 +56,10 @@ class GameState: ObservableObject {
     let humanSeat: Seat = .south
     @Published var switchSeatsForDeclarer: Bool = false
     @Published var rkcbFlavor: RKCBFlavor = .f1430
+    @Published var conventionSettings: ConventionSettings = ConventionSettings.load() {
+        didSet { conventionSettings.save() }
+    }
+    @Published var bidWarning: BidAnalysis? = nil
 
     // MARK: - Computed
 
@@ -197,6 +201,7 @@ class GameState: ObservableObject {
         aiThinking      = false
         biddingNote     = ""
         practiceHint    = ""
+        bidWarning      = nil
 
         statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
         phase = .bidding
@@ -222,6 +227,18 @@ class GameState: ObservableObject {
                 showPracticeFeedback = true
             }
             practiceHint = ""
+        }
+
+        // Run convention coach on human's bid
+        if currentBidder == humanSeat {
+            bidWarning = ConventionCoach.analyze(
+                hand: hands[humanSeat] ?? [],
+                chosenBid: bid,
+                auction: auction,
+                settings: conventionSettings
+            )
+        } else {
+            bidWarning = nil
         }
 
         auction.append(AuctionEntry(seat: currentBidder, bid: bid))
@@ -380,6 +397,7 @@ class GameState: ObservableObject {
     }
 
     private func finalizeBidding() {
+        bidWarning = nil
         if auction.allSatisfy({ $0.bid == .pass }) {
             statusMessage = "Passed out — no hand played"
             dealer = dealer.next
