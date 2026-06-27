@@ -147,11 +147,20 @@ struct GameTableView: View {
     private var scoreColumn: some View {
         VStack(spacing: 6) {
             if let convention = game.practiceConvention {
-                Text("Practice:\n\(convention.rawValue)")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.yellow)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 4)
+                VStack(spacing: 2) {
+                    Text("PRACTICE")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundColor(.black)
+                    Text(convention.rawValue)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.black)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
+                .background(Color.yellow)
+                .cornerRadius(6)
             }
             ScorePadView()
 
@@ -402,16 +411,22 @@ struct GameTableView: View {
     @ViewBuilder
     private var centerContent: some View {
         if game.phase == .bidding {
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
+            VStack(spacing: 10) {
+                // Thinking indicator — only when AI is active
+                if game.aiThinking {
+                    HStack(spacing: 6) {
+                        ProgressView().tint(.white).scaleEffect(0.7)
+                        Text("\(game.currentBidder.name) is thinking…")
+                            .font(.caption.bold())
+                            .foregroundColor(.white.opacity(0.75))
+                    }
+                } else if !game.isHumanTurn {
                     Text("\(game.currentBidder.name)'s turn")
                         .font(.caption.bold())
                         .foregroundColor(.white.opacity(0.75))
-                    if game.aiThinking {
-                        ProgressView().tint(.white).scaleEffect(0.7)
-                    }
                 }
-                // Auction always visible so South knows what was bid before their turn
+
+                // Auction + bidding box side by side
                 HStack(alignment: .top, spacing: 8) {
                     if !game.auction.isEmpty {
                         AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
@@ -423,39 +438,8 @@ struct GameTableView: View {
                     }
                 }
 
-                // Bid warning banner (non-blocking, advisory)
-                if let warning = game.bidWarning {
-                    BidWarningView(analysis: warning)
-                        .padding(.horizontal, 4)
-                }
-
-                if !game.practiceHint.isEmpty {
-                    Text(game.practiceHint)
-                        .font(.caption2)
-                        .foregroundColor(.yellow)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(8)
-                }
-
-                if !game.biddingNote.isEmpty {
-                    Text(game.biddingNote)
-                        .font(.caption)
-                        .foregroundColor(.primary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground).opacity(0.95))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.blue.opacity(0.4), lineWidth: 0.5)
-                        )
-                        .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.2), value: game.biddingNote)
-                }
+                // Info area — one clearly styled block per item, in priority order
+                biddingInfoArea
             }
         } else if game.phase == .playing {
             VStack(spacing: 4) {
@@ -469,6 +453,61 @@ struct GameTableView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Bidding info area
+
+    @ViewBuilder
+    private var biddingInfoArea: some View {
+        // Practice hint — large, prominent coaching tip (shown before human bids)
+        if !game.practiceHint.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lightbulb.fill")
+                    .font(.footnote)
+                    .foregroundColor(.yellow)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Convention Tip")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.yellow)
+                    Text(game.practiceHint)
+                        .font(.footnote)
+                        .foregroundColor(.white.opacity(0.95))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.55))
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.yellow.opacity(0.45), lineWidth: 1)
+            )
+        }
+
+        // Bid warning — advisory (shown after human commits a bid)
+        if let warning = game.bidWarning {
+            BidWarningView(analysis: warning)
+        }
+
+        // AI bid explanation — only when no practice hint is showing
+        if !game.biddingNote.isEmpty && game.practiceHint.isEmpty {
+            Text(game.biddingNote)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.secondarySystemBackground).opacity(0.90))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
+                )
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: game.biddingNote)
         }
     }
 
