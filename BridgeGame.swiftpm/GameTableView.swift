@@ -29,7 +29,7 @@ struct GameTableView: View {
     // Also wide when North is declarer (seats not switched) — suit-row layout is too tall
     // for the small northRatio frame; use the horizontal fan so all cards and indices are visible
     private var isNorthFaceUpDeclarer: Bool {
-        dummyRevealed && game.contract?.declarer == .north &&
+        game.contract?.declarer == .north &&
         !game.switchSeatsForDeclarer && game.phase == .playing
     }
     private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer || isNorthFaceUpDeclarer }
@@ -190,9 +190,18 @@ struct GameTableView: View {
     private func contractButton(_ c: Contract) -> some View {
         Button { showAuction.toggle() } label: {
             VStack(spacing: 2) {
-                Text(c.display)
-                    .font(.callout.bold())
-                    .foregroundColor(.primary)
+                HStack(spacing: 1) {
+                    Text("\(c.level.rawValue)")
+                        .foregroundColor(.primary)
+                    Text(c.strain.display)
+                        .foregroundColor(c.strain.color(alternate: game.conventionSettings.useAlternateColors))
+                    if c.doubled == .doubled {
+                        Text("X").foregroundColor(.red)
+                    } else if c.doubled == .redoubled {
+                        Text("XX").foregroundColor(.purple)
+                    }
+                }
+                .font(.callout.bold())
                 Text("by \(c.declarer.name)")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -271,8 +280,7 @@ struct GameTableView: View {
     private func isNorthFaceUp() -> Bool {
         guard game.phase == .playing else { return false }
         if game.dummy == .north { return dummyRevealed }
-        // When North is declarer and human (South) is dummy, reveal North's hand after opening lead
-        if game.contract?.declarer == .north && !game.switchSeatsForDeclarer { return dummyRevealed }
+        if game.contract?.declarer == .north && !game.switchSeatsForDeclarer { return true }
         if isNorthWideDeclarer { return true }
         return false
     }
