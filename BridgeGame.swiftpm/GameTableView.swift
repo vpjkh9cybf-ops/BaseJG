@@ -30,12 +30,12 @@ struct GameTableView: View {
 
     // Layout ratios for the north / mid / south rows
     private var northRatio: Double {
-        if isBiddingPhase        { return 0.09 }
+        if isBiddingPhase        { return 0.13 }
         if northIsWide           { return 0.22 }
         return 0.14
     }
     private var midRatio: Double {
-        if isBiddingPhase        { return 0.62 }
+        if isBiddingPhase        { return 0.58 }
         if northIsWide           { return 0.54 }
         return 0.56
     }
@@ -407,6 +407,7 @@ struct GameTableView: View {
             }
         }
         .padding(.horizontal, 6)
+        .padding(.top, isBiddingPhase ? 8 : 0)
     }
 
     @ViewBuilder
@@ -427,12 +428,12 @@ struct GameTableView: View {
                         .foregroundColor(.white.opacity(0.75))
                 }
 
-                // Auction + bidding box side by side
+                // Auction + bidding box side by side — auction takes natural height
                 HStack(alignment: .top, spacing: 8) {
                     if !game.auction.isEmpty {
                         AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
                                     alternateColors: game.conventionSettings.useAlternateColors)
-                            .frame(minWidth: 160, maxWidth: 200, maxHeight: .infinity)
+                            .frame(minWidth: 160, maxWidth: 200)
                     }
                     if game.isHumanTurn {
                         BiddingBoxView()
