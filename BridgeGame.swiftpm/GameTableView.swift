@@ -343,8 +343,9 @@ struct GameTableView: View {
                 ZStack(alignment: .top) {
                     HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
                              trumpSuit: trump, legalCards: legal, onTap: tap)
+                        .frame(width: 280, height: 50)
                         .rotationEffect(.degrees(90))
-                        .fixedSize()
+                        .frame(width: 50, height: 280)
                     Text((isBidding(.west) ? "▶ " : "") + (isDummy ? "West\n(Dummy)" : "West"))
                         .font(.callout.bold())
                         .foregroundColor(seatColor(.west))
@@ -385,8 +386,9 @@ struct GameTableView: View {
                 ZStack(alignment: .top) {
                     HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
                              trumpSuit: trump, legalCards: legal, onTap: tap)
+                        .frame(width: 280, height: 50)
                         .rotationEffect(.degrees(-90))
-                        .fixedSize()
+                        .frame(width: 50, height: 280)
                     Text((isBidding(.east) ? "▶ " : "") + (isDummy ? "East\n(Dummy)" : "East"))
                         .font(.callout.bold())
                         .foregroundColor(seatColor(.east))
