@@ -26,7 +26,13 @@ struct GameTableView: View {
     private var isNorthWideDeclarer: Bool {
         game.switchSeatsForDeclarer && game.contract?.declarer == .north && game.phase == .playing
     }
-    private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer }
+    // Also wide when North is declarer (seats not switched) — suit-row layout is too tall
+    // for the small northRatio frame; use the horizontal fan so all cards and indices are visible
+    private var isNorthFaceUpDeclarer: Bool {
+        dummyRevealed && game.contract?.declarer == .north &&
+        !game.switchSeatsForDeclarer && game.phase == .playing
+    }
+    private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer || isNorthFaceUpDeclarer }
 
     // Layout ratios for the north / mid / south rows
     private var northRatio: Double {
@@ -281,8 +287,8 @@ struct GameTableView: View {
             : nil
         let label: String = {
             let prefix = isBidding(.north) ? "▶ " : ""
-            if isDummy             { return prefix + "North (Dummy)"      }
-            if isNorthWideDeclarer { return prefix + "North — Declarer"   }
+            if isDummy                                    { return prefix + "North (Dummy)"    }
+            if isNorthWideDeclarer || isNorthFaceUpDeclarer { return prefix + "North — Declarer" }
             return prefix + "North"
         }()
 
