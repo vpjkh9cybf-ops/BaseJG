@@ -21,6 +21,14 @@ struct AuctionContext {
 
     var highestCurrentBid: Bid? { auction.reversed().first(where: { $0.bid.isSuitBid })?.bid }
 
+    /// The bid that opened the auction, and who made it.
+    var openingEntry: (seat: Seat, bid: Bid)? { auction.first(where: { $0.bid.isSuitBid }) }
+
+    /// True when I already passed at my first turn — Drury and some 2/1
+    /// agreements only apply to (or only apply away from) a passed hand.
+    var iAmPassedHand: Bool { myBids.first?.bid == .pass }
+    var partnerIsPassedHand: Bool { partnerBids.first?.bid == .pass }
+
     var opponentIntervened: Bool {
         let opBids = (leftOpponentBids + rightOpponentBids)
         return opBids.contains(where: { $0.bid.isSuitBid || $0.bid == .double })
@@ -30,20 +38,32 @@ struct AuctionContext {
         auction.allSatisfy { $0.bid == .pass }
     }
 
+    /// I have not taken a call yet — an earlier pass does not count as acting.
+    var iHaveNotActed: Bool { myBids.allSatisfy { $0.bid == .pass } }
+
+    // Round counting is done on contract bids only. Counting raw entries breaks
+    // as soon as anyone passes first, which is exactly the passed-hand auction
+    // that Drury exists for.
+    var myContractBidCount: Int { myBids.filter { $0.bid.isSuitBid }.count }
+    var partnerContractBidCount: Int { partnerBids.filter { $0.bid.isSuitBid }.count }
+
     var partnerOpenedCleanly: Bool {
-        guard myBids.isEmpty,
+        guard iHaveNotActed,
               let _ = partnerLastContractBid,
               (leftOpponentBids + rightOpponentBids).allSatisfy({ $0.bid == .pass })
         else { return false }
         return true
     }
 
+    var iOpenedTheAuction: Bool { openingEntry?.seat == seat }
+    var partnerOpenedTheAuction: Bool { openingEntry?.seat == partner }
+
     var iRebidding: Bool {
-        myBids.count == 1 && partnerBids.count == 1 && myBids[0].bid.isSuitBid
+        iOpenedTheAuction && myContractBidCount == 1 && partnerContractBidCount == 1
     }
 
     var partnerRebid: Bool {
-        partnerBids.count == 2 && myBids.count == 1
+        partnerOpenedTheAuction && partnerContractBidCount == 2 && myContractBidCount == 1
     }
 
     var partnerAskedForAces: Bool {
@@ -64,19 +84,48 @@ struct AuctionContext {
     }
 }
 
+/// The bidding engine. It is an instance rather than a namespace of static
+/// functions so the partnership's convention card can be carried through every
+/// decision without threading a parameter into forty call sites.
 struct BiddingAI {
 
-    static func selectBid(
+    let settings: ConventionSettings
+
+    init(settings: ConventionSettings = ConventionSettings()) {
+        self.settings = settings
+    }
+
+    // MARK: - Convention card shorthands
+
+    private var rkcbFlavor: RKCBFlavor {
+        settings.slamAskStyle == .rkcb0314 ? .f0314 : .f1430
+    }
+    private var usesKeyCards: Bool { settings.slamAskStyle != .standardBW }
+    private var overcall1LevelMin: Int { settings.overcallStyle == .light ? 8 : 10 }
+
+    // MARK: - Entry point
+
+    func selectBid(
         hand: [Card],
         seat: Seat,
         auction: [(seat: Seat, bid: Bid)],
-        vulnerability: Vulnerability,
-        rkcbFlavor: RKCBFlavor = .f1430
+        vulnerability: Vulnerability
     ) -> Bid {
         let eval = HandEvaluator.evaluate(hand)
         let ctx  = AuctionContext(seat: seat, auction: auction)
 
         if ctx.isOpeningPosition { return openingBid(eval: eval, hand: hand, vulnerability: vulnerability) }
+
+        // Exclusion RKCB — partner jumped to five of a brand-new suit over an
+        // agreed trump fit, asking for key cards outside it.
+        if let excluded = partnerMadeExclusionAsk(ctx) {
+            return exclusionResponse(hand: hand, ctx: ctx, excluding: excluded)
+        }
+
+        // Answer partner's key-card ask before anything else can talk over it.
+        if partnerAskedKeyCards(ctx) {
+            return slamAskResponse(eval: eval, hand: hand, ctx: ctx)
+        }
 
         if ctx.partnerOpenedCleanly, let partnerOpen = ctx.partnerLastContractBid {
             return respond(to: partnerOpen, eval: eval, hand: hand, ctx: ctx)
@@ -87,29 +136,28 @@ struct BiddingAI {
         }
 
         if ctx.partnerRebid {
-            return responderRebid(eval: eval, hand: hand, ctx: ctx, rkcbFlavor: rkcbFlavor)
+            return responderRebid(eval: eval, hand: hand, ctx: ctx)
         }
 
-        // Respond to partner's RKCB ask (regardless of auction round)
-        if ctx.partnerAskedForAces {
-            return rkcbResponse(eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor)
-        }
-
-        // I asked RKCB; partner just answered — place the contract
+        // I asked for key cards; partner just answered — place the contract
         if ctx.justReceivedBlackwoodResponse, let bwResp = ctx.partnerLastContractBid {
-            return rkcbFollowup(response: bwResp, eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor)
+            return slamFollowup(response: bwResp, eval: eval, hand: hand, ctx: ctx)
         }
 
         if ctx.opponentIntervened {
             return competitiveBid(eval: eval, hand: hand, ctx: ctx)
         }
 
+        // Opener answering a checkback lands here — it is a third-round bid, so
+        // neither the rebid nor the responder-rebid branch catches it.
+        if let answer = checkbackAnswer(eval: eval, hand: hand, ctx: ctx) { return answer }
+
         return lateBid(eval: eval, hand: hand, ctx: ctx)
     }
 
     // MARK: - Opening Bids
 
-    private static func openingBid(eval: HandEvaluation, hand: [Card], vulnerability: Vulnerability) -> Bid {
+    private func openingBid(eval: HandEvaluation, hand: [Card], vulnerability: Vulnerability) -> Bid {
         let hcp = eval.hcp
 
         if hcp < 12 { return preemptBid(eval: eval, hand: hand, vulnerability: vulnerability) }
@@ -151,26 +199,38 @@ struct BiddingAI {
         return .contract(.one, .clubs)
     }
 
-    private static func preemptBid(eval: HandEvaluation, hand: [Card], vulnerability: Vulnerability) -> Bid {
+    private func preemptBid(eval: HandEvaluation, hand: [Card], vulnerability: Vulnerability) -> Bid {
         let hcp = eval.hcp
-        // Weak 2s (5–10 HCP, good 6-card suit, not clubs)
-        if hcp >= 5 && hcp <= 10 {
-            for suit in [Suit.spades, .hearts, .diamonds] {
-                if eval.length(suit) >= 6 && eval.isSolidOrSemi(suit, in: hand) {
+
+        // ── Weak twos, in the style the partnership plays ────────────────────
+        if settings.weakTwoEnabled && settings.weakTwoStyle.hcpRange.contains(hcp) {
+            let needsGoodSuit = settings.weakTwoStyle == .disciplined
+
+            for suit in [Suit.spades, .hearts, .diamonds] where eval.length(suit) >= 6 {
+                if !needsGoodSuit || eval.isSolidOrSemi(suit, in: hand) {
                     return .contract(.two, suit.strain)
                 }
             }
-            // Allow weaker 6-card suit at lower vulnerability
-            if vulnerability == .neither || vulnerability == .northSouth {
-                for suit in [Suit.spades, .hearts, .diamonds] {
-                    if eval.length(suit) >= 6 { return .contract(.two, suit.strain) }
+            // A disciplined partnership still preempts a ragged suit when the
+            // vulnerability makes it cheap.
+            if needsGoodSuit && (vulnerability == .neither || vulnerability == .northSouth) {
+                for suit in [Suit.spades, .hearts, .diamonds] where eval.length(suit) >= 6 {
+                    return .contract(.two, suit.strain)
+                }
+            }
+            // Aggressive style will open a strong 5-card major
+            if settings.weakTwoStyle == .aggressive {
+                for suit in [Suit.spades, .hearts]
+                where eval.length(suit) >= 5 && eval.isSolidOrSemi(suit, in: hand) {
+                    return .contract(.two, suit.strain)
                 }
             }
         }
+
         // 3-level preempt (4–9 HCP, 7-card suit)
         if hcp >= 4 && hcp <= 9 {
-            for suit in Suit.allCases.reversed() {
-                if eval.length(suit) >= 7 { return .contract(.three, suit.strain) }
+            for suit in Suit.allCases.reversed() where eval.length(suit) >= 7 {
+                return .contract(.three, suit.strain)
             }
         }
         return .pass
@@ -178,7 +238,7 @@ struct BiddingAI {
 
     // MARK: - Responses
 
-    private static func respond(to open: Bid, eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
+    private func respond(to open: Bid, eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
         guard let level = open.level, let strain = open.strain else { return .pass }
 
         switch (level, strain) {
@@ -186,7 +246,7 @@ struct BiddingAI {
         case (.two, .notrump):  return respondToTwoNT(eval: eval, hand: hand)
         case (.two, .clubs):    return respondToTwoClubs(eval: eval)
         case (.one, .hearts), (.one, .spades):
-            return respondToOneMajor(open: open, openStrain: strain, eval: eval, hand: hand)
+            return respondToOneMajor(open: open, openStrain: strain, eval: eval, hand: hand, ctx: ctx)
         case (.one, .clubs), (.one, .diamonds):
             return respondToOneMinor(open: open, openStrain: strain, eval: eval, hand: hand)
         case (.two, .hearts), (.two, .spades), (.two, .diamonds):
@@ -197,49 +257,86 @@ struct BiddingAI {
     }
 
     // Response to 1NT (15–17)
-    private static func respondToOneNT(eval: HandEvaluation, hand: [Card]) -> Bid {
+    private func respondToOneNT(eval: HandEvaluation, hand: [Card]) -> Bid {
         let hcp = eval.hcp
         let sp = eval.length(.spades)
         let h  = eval.length(.hearts)
+        let d  = eval.length(.diamonds)
+        let c  = eval.length(.clubs)
+        let transfers = settings.jacobyTransfersEnabled
 
-        // Game in long major when combined points are enough
-        if sp >= 6 && hcp >= 9  { return .contract(.four, .spades)   } // Game with 6+ spades
-        if h  >= 6 && hcp >= 9  { return .contract(.four, .hearts)   } // Game with 6+ hearts
-        if sp >= 6              { return .contract(.two, .hearts)     } // Transfer weak 6-spader
-        if h  >= 6              { return .contract(.two, .diamonds)   } // Transfer weak 6-hearter
+        // ── Texas: 6+ major with game values and no slam ambition ───────────
+        if transfers && settings.texasTransfers == .on && hcp >= 9 && hcp <= 15 {
+            if sp >= 6 && sp >= h { return .contract(.four, .hearts)   }  // 4♥ → 4♠
+            if h  >= 6            { return .contract(.four, .diamonds) }  // 4♦ → 4♥
+        }
+
+        // ── Long major with game values ─────────────────────────────────────
+        if sp >= 6 && hcp >= 9 {
+            return transfers ? .contract(.two, .hearts) : .contract(.four, .spades)
+        }
+        if h >= 6 && hcp >= 9 {
+            return transfers ? .contract(.two, .diamonds) : .contract(.four, .hearts)
+        }
+        // Weak with a 6-card major: transfer and pass, or leave 1NT alone
+        if sp >= 6 { return transfers ? .contract(.two, .hearts)   : .pass }
+        if h  >= 6 { return transfers ? .contract(.two, .diamonds) : .pass }
+
+        // ── Four-suit transfers put weak long minors into the picture ───────
+        if transfers && settings.transferStyle == .fourSuit && hcp < 8 {
+            if c >= 6 { return .contract(.two, .spades)  }  // 2♠  → 3♣
+            if d >= 6 { return .contract(.two, .notrump) }  // 2NT → 3♦
+        }
+
+        // ── Garbage / Crawling Stayman: weak, short clubs, both majors ──────
+        if settings.staymanEnabled && settings.staymanVariant == .garbage
+            && hcp < 8 && c <= 2 && sp >= 4 && h >= 4 {
+            return .contract(.two, .clubs)
+        }
 
         if hcp < 8 {
-            if sp >= 5 { return .contract(.two, .hearts)   } // Jacoby transfer to spades
-            if h  >= 5 { return .contract(.two, .diamonds) } // Jacoby transfer to hearts
+            if transfers && sp >= 5 { return .contract(.two, .hearts)   }
+            if transfers && h  >= 5 { return .contract(.two, .diamonds) }
             return .pass
         }
 
-        // 8+ HCP
-        if sp >= 5 && sp >= h { return .contract(.two, .hearts)   } // Transfer → 2♠
-        if h  >= 5            { return .contract(.two, .diamonds) } // Transfer → 2♥
-        if sp >= 4 || h >= 4  { return .contract(.two, .clubs)    } // Stayman
-        if hcp >= 15          { return .contract(.four, .notrump)  } // Quantitative slam invite
-        if hcp >= 10          { return .contract(.three, .notrump) }
-        if hcp >= 8           { return .contract(.two, .notrump)   }
-        return .contract(.three, .notrump)
+        // ── 8+ HCP with a 5-card major ──────────────────────────────────────
+        if sp >= 5 && sp >= h {
+            if transfers { return .contract(.two, .hearts) }
+            return hcp >= 10 ? .contract(.three, .spades) : .contract(.two, .spades)
+        }
+        if h >= 5 {
+            if transfers { return .contract(.two, .diamonds) }
+            return hcp >= 10 ? .contract(.three, .hearts) : .contract(.two, .hearts)
+        }
+
+        // ── Stayman with a 4-card major ─────────────────────────────────────
+        if settings.staymanEnabled && (sp >= 4 || h >= 4) { return .contract(.two, .clubs) }
+
+        // ── Slam tries ──────────────────────────────────────────────────────
+        if settings.gerberEnabled && hcp >= 16 { return .contract(.four, .clubs)   }
+        if hcp >= 15                           { return .contract(.four, .notrump) }
+        if hcp >= 10                           { return .contract(.three, .notrump) }
+        return .contract(.two, .notrump)
     }
 
     // Response to 2NT (20–21)
-    private static func respondToTwoNT(eval: HandEvaluation, hand: [Card]) -> Bid {
+    private func respondToTwoNT(eval: HandEvaluation, hand: [Card]) -> Bid {
         let hcp = eval.hcp
         let sp = eval.length(.spades)
         let h  = eval.length(.hearts)
         if hcp == 0 && sp < 5 && h < 5 { return .pass }
-        if sp >= 5 { return .contract(.three, .hearts)   } // Jacoby transfer
-        if h  >= 5 { return .contract(.three, .diamonds) } // Jacoby transfer
-        if sp >= 4 || h >= 4 { return .contract(.three, .clubs) } // Puppet Stayman
-        if hcp >= 10 { return .contract(.six, .notrump) }
+        if settings.jacobyTransfersEnabled && sp >= 5 { return .contract(.three, .hearts)   }
+        if settings.jacobyTransfersEnabled && h  >= 5 { return .contract(.three, .diamonds) }
+        if settings.staymanEnabled && (sp >= 4 || h >= 4) { return .contract(.three, .clubs) }
+        if settings.gerberEnabled && hcp >= 11 { return .contract(.four, .clubs) }
+        if hcp >= 10 { return .contract(.six, .notrump)   }
         if hcp >= 4  { return .contract(.three, .notrump) }
         return .pass
     }
 
     // Response to 2♣ (strong)
-    private static func respondToTwoClubs(eval: HandEvaluation) -> Bid {
+    private func respondToTwoClubs(eval: HandEvaluation) -> Bid {
         let hcp = eval.hcp
         if hcp < 8 { return .contract(.two, .diamonds) } // Waiting
         if eval.length(.spades) >= 5   { return .contract(.two, .spades)      }
@@ -250,132 +347,176 @@ struct BiddingAI {
     }
 
     // Response to 1♥ or 1♠
-    private static func respondToOneMajor(open: Bid, openStrain: Strain, eval: HandEvaluation, hand: [Card]) -> Bid {
+    private func respondToOneMajor(
+        open: Bid,
+        openStrain: Strain,
+        eval: HandEvaluation,
+        hand: [Card],
+        ctx: AuctionContext
+    ) -> Bid {
         let hcp = eval.hcp
         let tp  = eval.totalPoints
         guard let openSuit = openStrain.suit else { return .pass }
         let fit = eval.length(openSuit)
+        let passed = ctx.iAmPassedHand
 
         if hcp < 6 { return .pass }
 
-        // Jacoby 2NT: 4+ fit, 13+ HCP, game-forcing
-        if fit >= 4 && hcp >= 13 {
-            return .contract(.two, .notrump)
-        }
-
-        // Splinter: 4+ fit, 10–12 HCP, singleton/void in side suit
-        if fit >= 4 && hcp >= 10 && hcp <= 12 {
-            let side = Suit.allCases.filter { $0 != openSuit }.sorted { eval.length($0) < eval.length($1) }
-            if let short = side.first, eval.length(short) <= 1,
-               let spl = splinterBid(openSuit: openSuit, singletonSuit: short) {
-                return spl
+        // ── Drury — only ever by a passed hand ──────────────────────────────
+        if settings.druryEnabled && passed && fit >= 3 && tp >= 10 && tp <= 12 {
+            if settings.druryStyle == .twoWay {
+                return fit >= 4 ? .contract(.two, .diamonds) : .contract(.two, .clubs)
             }
-        }
-
-        // Reverse Drury: 2♣ = limit raise (3+ fit, 10–11 TP)
-        if fit >= 3 && tp >= 10 && tp <= 12 && hcp <= 11 {
             return .contract(.two, .clubs)
         }
 
-        // Game raise with fit (12+ TP)
-        if fit >= 3 && tp >= 13 {
-            return .contract(.four, openStrain)
+        // ── Splinter — more descriptive than 2NT, so it is offered first ────
+        if settings.splinterEnabled && fit >= 4 {
+            let side = Suit.allCases.filter { $0 != openSuit }.sorted { eval.length($0) < eval.length($1) }
+            if let short = side.first, eval.length(short) <= 1,
+               let spl = splinterBid(openSuit: openSuit, singletonSuit: short) {
+                if hcp >= settings.splinterMinHCP { return spl }
+                if settings.miniSplinters && hcp >= 10 && hcp < settings.splinterMinHCP { return spl }
+            }
         }
 
-        // Simple raise (6–9 HCP, 3+ fit)
-        if fit >= 3 && hcp >= 6 {
-            return .contract(.two, openStrain)
+        // ── Jacoby 2NT: 4+ fit, 13+ HCP, game-forcing ───────────────────────
+        if settings.jacoby2NTEnabled && !passed && fit >= 4 && hcp >= 13 {
+            return .contract(.two, .notrump)
         }
+
+        // ── Limit raise (Drury unavailable or not a passed hand) ────────────
+        if fit >= 3 && tp >= 10 && tp <= 12 && hcp <= 11 {
+            return .contract(.three, openStrain)
+        }
+
+        // Game raise with fit (13+ TP)
+        if fit >= 3 && tp >= 13 { return .contract(.four, openStrain) }
+
+        // Simple raise (6–9 HCP, 3+ fit)
+        if fit >= 3 && hcp >= 6 { return .contract(.two, openStrain) }
 
         // After 1♥: show 4-card spades regardless of strength
         if openStrain == .hearts && eval.length(.spades) >= 4 {
             return .contract(.one, .spades)
         }
 
-        // 2/1 Game Force (13+ HCP, 5-card suit, no fit)
+        // ── Strong hand with no fit ─────────────────────────────────────────
         if hcp >= 13 {
-            if openStrain == .spades {
-                if eval.length(.hearts) >= 5   { return .contract(.two, .hearts)   }
-                if eval.length(.clubs) >= 5    { return .contract(.two, .clubs)    }
-                if eval.length(.diamonds) >= 5 { return .contract(.two, .diamonds) }
-            } else { // after 1♥: spades shown above for 4+
-                if eval.length(.clubs) >= 5    { return .contract(.two, .clubs)    }
-                if eval.length(.diamonds) >= 5 { return .contract(.two, .diamonds) }
-                // 5+ spades: can't bid 1♠ (already past it), use game force 2♠
-                if eval.length(.spades) >= 5   { return .contract(.two, .spades)   }
+            let twoOverOneOn = settings.twoOverOneEnabled &&
+                !(settings.twoOverOneScope == .gameForcingUnpassed && passed)
+
+            if twoOverOneOn {
+                if openStrain == .spades {
+                    if eval.length(.hearts) >= 5   { return .contract(.two, .hearts)   }
+                    if eval.length(.clubs) >= 5    { return .contract(.two, .clubs)    }
+                    if eval.length(.diamonds) >= 5 { return .contract(.two, .diamonds) }
+                } else { // after 1♥: spades already shown above with 4+
+                    if eval.length(.clubs) >= 5    { return .contract(.two, .clubs)    }
+                    if eval.length(.diamonds) >= 5 { return .contract(.two, .diamonds) }
+                    if eval.length(.spades) >= 5   { return .contract(.two, .spades)   }
+                }
+                if eval.isBalanced { return .contract(.three, .notrump) }
+                return .contract(.two, .notrump)
             }
+
+            // Without 2/1 the same hands go through a forcing 1NT or a jump
+            // shift, so nothing below game is promised by a plain 2-level bid.
             if eval.isBalanced { return .contract(.three, .notrump) }
-            // Semi-balanced game force: rebid as 2NT (Jacoby-like)
+            for suit in [Suit.spades, .hearts, .diamonds, .clubs] where suit != openSuit {
+                if eval.length(suit) >= 5 {
+                    let jump = Bid.contract(.three, suit.strain)
+                    if jump.isHigherThan(open) { return jump }
+                }
+            }
             return .contract(.two, .notrump)
         }
 
-        // 1NT (6–12 HCP, semi-forcing — no fit, no other bid)
+        // 1NT response — forcing or semi-forcing per the partnership's agreement
         return .contract(.one, .notrump)
     }
 
     // Response to 1♣ or 1♦
-    private static func respondToOneMinor(open: Bid, openStrain: Strain, eval: HandEvaluation, hand: [Card]) -> Bid {
+    private func respondToOneMinor(open: Bid, openStrain: Strain, eval: HandEvaluation, hand: [Card]) -> Bid {
         let hcp = eval.hcp
         if hcp < 6 { return .pass }
+        guard let openSuit = openStrain.suit else { return .pass }
 
         // Majors first
         if eval.length(.spades) >= 4 { return .contract(.one, .spades) }
         if eval.length(.hearts) >= 4 { return .contract(.one, .hearts) }
 
-        let openSuit = openStrain.suit!
+        // ── Inverted minors outrank a notrump response with real support ────
+        if settings.minorRaiseStyle == .inverted && eval.length(openSuit) >= 5 {
+            // Single raise is 10+ and forcing; the jump raise is preemptive
+            return hcp >= 10 ? .contract(.two, openStrain) : .contract(.three, openStrain)
+        }
 
         // NT responses (balanced, no 4-card major)
         if hcp >= 13 && hcp <= 15 && eval.isBalanced { return .contract(.three, .notrump) }
         if hcp >= 10 && hcp <= 12 && eval.isBalanced { return .contract(.two, .notrump)   }
         if hcp >= 6  && hcp <= 9  && eval.isBalanced { return .contract(.one, .notrump)   }
 
-        // Minor raises — check HIGHER level first
+        // Standard minor raises — check the HIGHER level first
         if eval.length(openSuit) >= 5 && hcp >= 13 { return .contract(.three, openStrain) }
-        if eval.length(openSuit) >= 5               { return .contract(.two, openStrain)   }
+        if eval.length(openSuit) >= 5              { return .contract(.two, openStrain)   }
 
-        // Show other minor
+        // Show the other minor
         let otherMinor: Strain = (openStrain == .clubs) ? .diamonds : .clubs
-        if eval.length(otherMinor.suit!) >= 4 && hcp >= 10 { return .contract(.two, otherMinor) }
+        if let om = otherMinor.suit, eval.length(om) >= 4 && hcp >= 10 {
+            return .contract(.two, otherMinor)
+        }
 
         return .contract(.one, .notrump)
     }
 
-    private static func respondToWeakTwo(open: Bid, openStrain: Strain, eval: HandEvaluation) -> Bid {
+    private func respondToWeakTwo(open: Bid, openStrain: Strain, eval: HandEvaluation) -> Bid {
         let hcp = eval.hcp
         guard let openSuit = openStrain.suit else { return .pass }
         let fit = eval.length(openSuit)
 
         if hcp >= 14 && fit >= 3 { return .contract(.four, openStrain) }
-        if hcp >= 12 && fit >= 3 { return .contract(.three, openStrain) }
-        if hcp < 12  && fit >= 3 { return .contract(.three, openStrain) } // Preemptive raise
+        if fit >= 3              { return .contract(.three, openStrain) }  // preemptive / invitational raise
         if hcp >= 14 {
-            for suit in [Suit.spades, .hearts, .diamonds, .clubs] {
-                if eval.length(suit) >= 5 && suit != openSuit {
-                    return .contract(.three, suit.strain)
+            for suit in [Suit.spades, .hearts, .diamonds, .clubs] where suit != openSuit {
+                if eval.length(suit) >= 5 {
+                    let b = Bid.contract(.three, suit.strain)
+                    if b.isHigherThan(open) { return b }
                 }
             }
-            return .contract(.two, .notrump) // Ogust enquiry
+            return .contract(.two, .notrump)   // the ask — Ogust or feature
         }
         return .pass
     }
 
     // MARK: - Rebids (opener's second bid)
 
-    private static func rebid(
+    private func rebid(
         myOpen: Bid,
         partnerResp: Bid,
         eval: HandEvaluation,
         hand: [Card],
         ctx: AuctionContext
     ) -> Bid {
-        guard let openStrain = myOpen.strain else { return .pass }
+        guard let openStrain = myOpen.strain, let openLevel = myOpen.level else { return .pass }
 
-        if openStrain == .notrump && myOpen.level == .one {
+        if openStrain == .notrump && openLevel == .one {
             return rebidAfterOneNT(partnerResp: partnerResp, eval: eval, hand: hand)
         }
-        if openStrain == .clubs && myOpen.level == .two {
+        if openStrain == .notrump && openLevel == .two {
+            return rebidAfterTwoNT(partnerResp: partnerResp, eval: eval, hand: hand)
+        }
+        if openStrain == .clubs && openLevel == .two {
             return rebidAfterTwoClubs(partnerResp: partnerResp, eval: eval, hand: hand)
         }
+        // A weak two describes the hand in one bid; opener never invents a
+        // second one beyond answering the ask.
+        if openLevel == .two {
+            return rebidAfterWeakTwo(openStrain: openStrain, partnerResp: partnerResp,
+                                     eval: eval, hand: hand)
+        }
+        if openLevel == .three { return .pass }   // preempt: already said everything
+
         if openStrain.isMajor {
             return rebidAfterMajorOpen(openStrain: openStrain, partnerResp: partnerResp,
                                        eval: eval, hand: hand, ctx: ctx)
@@ -384,24 +525,69 @@ struct BiddingAI {
                                    eval: eval, hand: hand, ctx: ctx)
     }
 
-    private static func rebidAfterOneNT(partnerResp: Bid, eval: HandEvaluation, hand: [Card]) -> Bid {
-        guard let respStrain = partnerResp.strain, let respLevel = partnerResp.level else { return .pass }
+    /// Does opener hold a maximum with real support — worth jumping a level?
+    private func superAccepts(_ suit: Suit, eval: HandEvaluation) -> Bool {
+        eval.hcp >= settings.superAcceptThreshold && eval.length(suit) >= 4
+    }
 
-        if respLevel == .two && respStrain == .clubs {
-            if eval.length(.spades) >= 4 { return .contract(.two, .spades) }
-            if eval.length(.hearts) >= 4 { return .contract(.two, .hearts) }
+    private func staymanReply(eval: HandEvaluation) -> Bid {
+        if settings.staymanVariant == .puppet {
+            // Puppet looks for a 5-card major first; 2♦ denies one.
+            if eval.length(.spades) >= 5 { return .contract(.two, .spades) }
+            if eval.length(.hearts) >= 5 { return .contract(.two, .hearts) }
             return .contract(.two, .diamonds)
         }
-        if respLevel == .two && respStrain == .diamonds {
-            return eval.hcp >= 16 && eval.length(.hearts) >= 3
-                ? .contract(.three, .hearts)
-                : .contract(.two, .hearts)
+        // Standard: bid hearts first holding both majors, so 2♠ over 2♥ still
+        // finds the spade fit.
+        if eval.length(.hearts) >= 4 { return .contract(.two, .hearts) }
+        if eval.length(.spades) >= 4 { return .contract(.two, .spades) }
+        return .contract(.two, .diamonds)
+    }
+
+    private func gerberResponse(hand: [Card]) -> Bid {
+        let aces = hand.filter { $0.rank == .ace }.count
+        switch aces {
+        case 0, 4: return .contract(.four, .diamonds)
+        case 1:    return .contract(.four, .hearts)
+        case 2:    return .contract(.four, .spades)
+        default:   return .contract(.four, .notrump)
         }
-        if respLevel == .two && respStrain == .hearts {
-            return eval.hcp >= 16 && eval.length(.spades) >= 3
-                ? .contract(.three, .spades)
-                : .contract(.two, .spades)
+    }
+
+    private func rebidAfterOneNT(partnerResp: Bid, eval: HandEvaluation, hand: [Card]) -> Bid {
+        guard let respStrain = partnerResp.strain, let respLevel = partnerResp.level else { return .pass }
+        let transfers = settings.jacobyTransfersEnabled
+
+        // ── Gerber ──────────────────────────────────────────────────────────
+        if settings.gerberEnabled && partnerResp == .contract(.four, .clubs) {
+            return gerberResponse(hand: hand)
         }
+
+        // ── Texas transfer completion ───────────────────────────────────────
+        if transfers && settings.texasTransfers == .on && respLevel == .four {
+            if respStrain == .diamonds { return .contract(.four, .hearts) }
+            if respStrain == .hearts   { return .contract(.four, .spades) }
+        }
+
+        // ── Stayman ─────────────────────────────────────────────────────────
+        if settings.staymanEnabled && respLevel == .two && respStrain == .clubs {
+            return staymanReply(eval: eval)
+        }
+
+        // ── Major transfers ─────────────────────────────────────────────────
+        if transfers && respLevel == .two && respStrain == .diamonds {
+            return superAccepts(.hearts, eval: eval) ? .contract(.three, .hearts) : .contract(.two, .hearts)
+        }
+        if transfers && respLevel == .two && respStrain == .hearts {
+            return superAccepts(.spades, eval: eval) ? .contract(.three, .spades) : .contract(.two, .spades)
+        }
+
+        // ── Minor transfers (four-suit only) — must precede the 2NT invite ──
+        if transfers && settings.transferStyle == .fourSuit && respLevel == .two {
+            if respStrain == .spades  { return .contract(.three, .clubs)    }
+            if respStrain == .notrump { return .contract(.three, .diamonds) }
+        }
+
         if respLevel == .two && respStrain == .notrump {
             return eval.hcp >= 17 ? .contract(.three, .notrump) : .pass
         }
@@ -411,7 +597,29 @@ struct BiddingAI {
         return .pass
     }
 
-    private static func rebidAfterTwoClubs(partnerResp: Bid, eval: HandEvaluation, hand: [Card]) -> Bid {
+    private func rebidAfterTwoNT(partnerResp: Bid, eval: HandEvaluation, hand: [Card]) -> Bid {
+        guard let respStrain = partnerResp.strain, let respLevel = partnerResp.level else { return .pass }
+
+        if settings.gerberEnabled && partnerResp == .contract(.four, .clubs) {
+            return gerberResponse(hand: hand)
+        }
+        // Puppet Stayman over 2NT: 5-card major first, 3♦ shows a 4-card major
+        if settings.staymanEnabled && respLevel == .three && respStrain == .clubs {
+            if eval.length(.spades) >= 5 { return .contract(.three, .spades) }
+            if eval.length(.hearts) >= 5 { return .contract(.three, .hearts) }
+            if eval.length(.spades) >= 4 || eval.length(.hearts) >= 4 {
+                return .contract(.three, .diamonds)
+            }
+            return .contract(.three, .notrump)
+        }
+        if settings.jacobyTransfersEnabled && respLevel == .three {
+            if respStrain == .diamonds { return .contract(.three, .hearts) }
+            if respStrain == .hearts   { return .contract(.three, .spades) }
+        }
+        return .pass
+    }
+
+    private func rebidAfterTwoClubs(partnerResp: Bid, eval: HandEvaluation, hand: [Card]) -> Bid {
         guard let respStrain = partnerResp.strain, let respLevel = partnerResp.level else { return .pass }
 
         if respLevel == .two && respStrain == .diamonds {
@@ -430,7 +638,57 @@ struct BiddingAI {
         return .contract(.three, .notrump)
     }
 
-    private static func rebidAfterMajorOpen(
+    /// Opener's reply after a weak two — this is where Ogust and feature-asks
+    /// actually differ.
+    private func rebidAfterWeakTwo(
+        openStrain: Strain,
+        partnerResp: Bid,
+        eval: HandEvaluation,
+        hand: [Card]
+    ) -> Bid {
+        guard let openSuit = openStrain.suit else { return .pass }
+        let maximum = eval.hcp >= settings.weakTwoStyle.hcpRange.upperBound - 2
+        let goodSuit = eval.isSolidOrSemi(openSuit, in: hand)
+
+        if partnerResp == .contract(.two, .notrump) {
+            switch settings.weakTwoResponse {
+            case .ogust:
+                if  goodSuit &&  maximum { return .contract(.three, .spades)   }
+                if  goodSuit && !maximum { return .contract(.three, .hearts)   }
+                if !goodSuit &&  maximum { return .contract(.three, .diamonds) }
+                return .contract(.three, .clubs)
+            case .feature, .mcCabe:
+                if maximum {
+                    for suit in [Suit.clubs, .diamonds, .hearts, .spades] where suit != openSuit {
+                        let hasTopHonour = hand.contains {
+                            $0.suit == suit && ($0.rank == .ace || $0.rank == .king)
+                        }
+                        if hasTopHonour {
+                            let b = Bid.contract(.three, suit.strain)
+                            if b.isHigherThan(partnerResp) { return b }
+                        }
+                    }
+                }
+                return .contract(.three, openStrain)
+            }
+        }
+
+        // Partner raised or bid a new suit — the weak two already told the story
+        return .pass
+    }
+
+    private func druryReply(openStrain: Strain, eval: HandEvaluation) -> Bid {
+        let hcp = eval.hcp
+        if hcp >= 16 { return .contract(.four, openStrain)  }
+        if hcp >= 14 { return .contract(.three, openStrain) }
+        // Minimum — how that is shown is the difference between the styles
+        if settings.druryStyle == .reverse {
+            return .contract(.two, openStrain)     // rebidding the major = minimum
+        }
+        return .contract(.two, .diamonds)          // 2♦ = minimum
+    }
+
+    private func rebidAfterMajorOpen(
         openStrain: Strain,
         partnerResp: Bid,
         eval: HandEvaluation,
@@ -439,81 +697,65 @@ struct BiddingAI {
     ) -> Bid {
         guard let respStrain = partnerResp.strain, let respLevel = partnerResp.level else { return .pass }
         let hcp = eval.hcp
-        let openSuit = openStrain.suit!
+        guard let openSuit = openStrain.suit else { return .pass }
 
-        // ── Support Double ────────────────────────────────────────────────────
-        if ctx.opponentIntervened, respLevel == .one, respStrain != openStrain,
-           let respSuit = respStrain.suit, eval.length(respSuit) == 3 {
+        // ── Support Double ──────────────────────────────────────────────────
+        if settings.supportDoubles, ctx.opponentIntervened, respLevel == .one,
+           respStrain != openStrain, let respSuit = respStrain.suit,
+           eval.length(respSuit) == 3 {
             return .double
         }
 
-        // ── Jacoby 2NT (4+ fit, game force) ──────────────────────────────────
-        // Jacoby 2NT Response — SAYC rule:
-        // 4M = minimum balanced (12-14 HCP) or no extras
-        // 3-new-suit = singleton OR void in that suit (shortness)
-        // 4-new-suit = 5-card side suit
-        // 3M = 6-card trump suit
-        if respLevel == .two && respStrain == .notrump {
-            // 3M — extra trump length (6+ cards)
+        // ── Drury (partner is a passed hand) ────────────────────────────────
+        if settings.druryEnabled, ctx.partnerIsPassedHand, respLevel == .two,
+           respStrain == .clubs || (settings.druryStyle == .twoWay && respStrain == .diamonds) {
+            return druryReply(openStrain: openStrain, eval: eval)
+        }
+
+        // ── Jacoby 2NT (4+ fit, game force) ─────────────────────────────────
+        // 3M = 6-card trump suit, 3-new = shortness, 4-new = 5-card side suit,
+        // 4M = minimum or balanced.
+        if settings.jacoby2NTEnabled && respLevel == .two && respStrain == .notrump {
             if eval.length(openSuit) >= 6 { return .contract(.three, openStrain) }
-            // 3-suit — shortness (singleton or void) in a side suit
             for suit in [Suit.clubs, .diamonds, .hearts, .spades] where suit != openSuit {
-                if eval.length(suit) <= 1 {
-                    return .contract(.three, suit.strain)
-                }
+                if eval.length(suit) <= 1 { return .contract(.three, suit.strain) }
             }
-            // 4-suit (new) — 5-card side suit
             for suit in [Suit.clubs, .diamonds, .hearts, .spades] where suit != openSuit {
-                if eval.length(suit) >= 5 {
-                    return .contract(.four, suit.strain)
-                }
+                if eval.length(suit) >= 5 { return .contract(.four, suit.strain) }
             }
-            // 4M — minimum or balanced
             return .contract(.four, openStrain)
         }
 
-        // ── Simple raise ──────────────────────────────────────────────────────
+        // ── Simple raise ────────────────────────────────────────────────────
         if respStrain == openStrain {
-            if hcp >= 17 { return .contract(.four, openStrain) }
+            if hcp >= 17 { return .contract(.four, openStrain)  }
             if hcp >= 15 { return .contract(.three, openStrain) }
             return .pass
         }
 
-        // ── 1NT response (6–11 HCP) ───────────────────────────────────────────
+        // ── 1NT response ────────────────────────────────────────────────────
         if respLevel == .one && respStrain == .notrump {
-            if hcp >= 19 { return .contract(.three, openStrain) }     // Strong jump
-            if hcp >= 17 { return .contract(.two, openStrain) }       // Extra values
-            // 15–16: show second suit or rebid 6-card major
+            if hcp >= 19 { return .contract(.three, openStrain) }
+            if hcp >= 17 { return .contract(.two, openStrain)   }
             if hcp >= 15 || eval.length(openSuit) >= 6 {
                 if eval.length(openSuit) >= 6 { return .contract(.two, openStrain) }
-                // Show 4-card lower suit (non-reverse)
-                let lowers: [Suit] = openStrain == .spades
-                    ? [.diamonds, .clubs]
-                    : [.diamonds, .clubs]
-                for suit in lowers {
-                    if eval.length(suit) >= 4 { return .contract(.two, suit.strain) }
+                for suit in [Suit.diamonds, .clubs] where eval.length(suit) >= 4 {
+                    return .contract(.two, suit.strain)
                 }
                 return .contract(.two, openStrain)
             }
-            // 12–14: rebid 6-card suit, or show 4-card suit, or pass
+            // 12–14: rebid a 6-card suit, or show a cheaper 4-card suit
             if eval.length(openSuit) >= 6 { return .contract(.two, openStrain) }
-            let lowers2: [Suit] = openStrain == .spades
-                ? [.hearts, .diamonds, .clubs]
-                : [.diamonds, .clubs]
-            for suit in lowers2 {
-                if eval.length(suit) >= 4 { return .contract(.two, suit.strain) }
+            let lowers: [Suit] = openStrain == .spades ? [.hearts, .diamonds, .clubs] : [.diamonds, .clubs]
+            for suit in lowers where eval.length(suit) >= 4 {
+                return .contract(.two, suit.strain)
             }
+            // Nothing natural left to say. A forcing 1NT still has to be answered.
+            if settings.oneNTResponseStyle == .forcing { return .contract(.two, openStrain) }
             return .pass
         }
 
-        // ── Reverse Drury: 2♣ = limit raise ──────────────────────────────────
-        if respLevel == .two && respStrain == .clubs {
-            if hcp >= 16 { return .contract(.four, openStrain)  }
-            if hcp >= 14 { return .contract(.two, openStrain)   }
-            return .contract(.two, .diamonds)                     // Minimum: responder signs off
-        }
-
-        // ── 2/1 game-force response ───────────────────────────────────────────
+        // ── 2/1 game-force response ─────────────────────────────────────────
         if respLevel == .two {
             let fit2 = (respStrain.suit.map { eval.length($0) } ?? 0)
             if fit2 >= 4 { return .contract(.three, respStrain) }
@@ -522,7 +764,7 @@ struct BiddingAI {
             return .contract(.two, openStrain)
         }
 
-        // ── 1♠ over 1♥ ───────────────────────────────────────────────────────
+        // ── 1♠ over 1♥ ──────────────────────────────────────────────────────
         if openStrain == .hearts && respStrain == .spades && respLevel == .one {
             if eval.length(.spades) >= 4 {
                 if hcp >= 16 { return .contract(.four, .spades)  }
@@ -537,7 +779,7 @@ struct BiddingAI {
         return highestSafeBid(eval: eval, above: ctx.highestCurrentBid)
     }
 
-    private static func rebidAfterMinorOpen(
+    private func rebidAfterMinorOpen(
         openStrain: Strain,
         partnerResp: Bid,
         eval: HandEvaluation,
@@ -546,62 +788,65 @@ struct BiddingAI {
     ) -> Bid {
         guard let respStrain = partnerResp.strain, let respLevel = partnerResp.level else { return .pass }
         let hcp = eval.hcp
-        let openSuit = openStrain.suit!
+        guard let openSuit = openStrain.suit else { return .pass }
 
-        // ── Partner bid a major at 1-level ───────────────────────────────────
-        if respStrain.isMajor && respLevel == .one {
-            let respSuit = respStrain.suit!
+        // ── Inverted minors: partner's single raise is forcing, 10+ ─────────
+        if settings.minorRaiseStyle == .inverted && respStrain == openStrain {
+            if respLevel == .two {
+                if hcp >= 18 { return .contract(.three, .notrump) }
+                // Show a stopper on the way, else rebid the minor
+                for suit in [Suit.hearts, .spades, .diamonds, .clubs] where suit != openSuit {
+                    let hasStopper = eval.length(suit) >= 3
+                    if hasStopper && hcp >= 15 { return .contract(.two, suit.strain) }
+                }
+                return .contract(.three, openStrain)
+            }
+            if respLevel == .three { return .pass }   // preemptive raise
+        }
+
+        // ── Partner bid a major at the 1-level ──────────────────────────────
+        if respStrain.isMajor && respLevel == .one, let respSuit = respStrain.suit {
             let fit = eval.length(respSuit)
             if fit >= 4 && hcp >= 17 { return .contract(.three, respStrain) }
-            if fit >= 4 && hcp >= 12 { return .contract(.two,   respStrain) }
-            if fit >= 4              { return .contract(.two,   respStrain) } // minimum raise
-            // No fit: show balanced range in NT or show second suit
+            if fit >= 4              { return .contract(.two,   respStrain) }
             if eval.isBalanced {
                 if hcp >= 18 { return .contract(.three, .notrump) }
                 if hcp >= 15 { return .contract(.two,   .notrump) }
                 return .contract(.one, .notrump)
             }
-            // Reverse: show other major if strong enough (e.g., 1♣-1♥-1♠ shows 4+♠, 17+)
             let otherMajor: Suit = (respSuit == .hearts) ? .spades : .hearts
             if eval.length(otherMajor) >= 4 && hcp >= 17 {
                 return .contract(.one, otherMajor.strain)
             }
-            // Rebid own minor
             if eval.length(openSuit) >= 5 && hcp >= 15 { return .contract(.two, openStrain) }
             return .contract(.one, .notrump)
         }
 
-        // ── Partner bid 1NT ───────────────────────────────────────────────────
+        // ── Partner bid 1NT ─────────────────────────────────────────────────
         if respStrain == .notrump && respLevel == .one {
             if eval.isBalanced {
                 if hcp >= 18 { return .contract(.three, .notrump) }
                 if hcp >= 15 { return .contract(.two,   .notrump) }
                 return .pass
             }
-            // Unbalanced: rebid suit or show second suit
             if eval.length(openSuit) >= 6 { return .contract(.two, openStrain) }
             if hcp >= 17                  { return .contract(.two, openStrain) }
             return .pass
         }
 
-        // ── Partner raised minor ──────────────────────────────────────────────
+        // ── Partner raised the minor (standard methods) ─────────────────────
         if respStrain == openStrain {
-            if hcp >= 19 { return .contract(.five, openStrain) }
-            if hcp >= 17 { return .contract(.four, openStrain) }
+            if hcp >= 19 { return .contract(.five, openStrain)  }
+            if hcp >= 17 { return .contract(.four, openStrain)  }
             if hcp >= 14 { return .contract(.three, openStrain) }
             return .pass
         }
 
-        // ── Partner bid 2NT (10–12 balanced) ─────────────────────────────────
         if respStrain == .notrump && respLevel == .two {
-            if hcp >= 15 { return .contract(.three, .notrump) }
-            return .pass
+            return hcp >= 15 ? .contract(.three, .notrump) : .pass
         }
-
-        // ── Partner bid 3NT (13–15 balanced) ─────────────────────────────────
         if respStrain == .notrump && respLevel == .three {
-            if hcp >= 16 { return .contract(.six, .notrump) }
-            return .pass
+            return hcp >= 16 ? .contract(.six, .notrump) : .pass
         }
 
         return .pass
@@ -609,115 +854,141 @@ struct BiddingAI {
 
     // MARK: - Responder Rebid
 
-    private static func responderRebid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext, rkcbFlavor: RKCBFlavor) -> Bid {
+    private func responderRebid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
         let hcp = eval.hcp
         guard let partnerRebidBid = ctx.partnerLastContractBid else { return .pass }
         guard let myResp = ctx.myLastContractBid else { return .pass }
         let partnerFirstBid = ctx.partnerFirstContractBid
 
-        // ── After RKCB ────────────────────────────────────────────────────────
-        if ctx.partnerAskedForAces { return rkcbResponse(eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor) }
-        if ctx.iAskedForAces       { return rkcbFollowup(response: partnerRebidBid, eval: eval, hand: hand, ctx: ctx, flavor: rkcbFlavor) }
+        // ── After a key-card ask ────────────────────────────────────────────
+        if partnerAskedKeyCards(ctx) { return slamAskResponse(eval: eval, hand: hand, ctx: ctx) }
+        if iAskedKeyCards(ctx) {
+            return slamFollowup(response: partnerRebidBid, eval: eval, hand: hand, ctx: ctx)
+        }
 
-        // ── After Drury 2♣ (partner opened 1M, I bid 2♣ = limit raise) ───────
-        if myResp == .contract(.two, .clubs) {
-            let isDrury = partnerFirstBid?.strain?.isMajor == true && partnerFirstBid?.level == .one
+        // ── After Drury ─────────────────────────────────────────────────────
+        let druryStart: Bool = settings.druryEnabled && ctx.iAmPassedHand &&
+            (myResp == .contract(.two, .clubs) ||
+             (settings.druryStyle == .twoWay && myResp == .contract(.two, .diamonds)))
 
-            if isDrury {
-                guard let openMajor = partnerFirstBid?.strain else { return .pass }
-                if let level = partnerRebidBid.level, let strain = partnerRebidBid.strain {
-                    if level == .two && strain == .diamonds {
-                        return .contract(.two, openMajor) // Sign off: opener showed minimum
-                    }
-                    if level == .two && strain.isMajor   { return .contract(.four, strain) }
-                    if level == .four                    { return .pass }
+        if druryStart, let openMajor = partnerFirstBid?.strain,
+           openMajor.isMajor, partnerFirstBid?.level == .one {
+            if let level = partnerRebidBid.level, let strain = partnerRebidBid.strain {
+                // Minimum shown — sign off in the major
+                if settings.druryStyle == .reverse && level == .two && strain == openMajor {
+                    return .pass
                 }
-                return .pass
+                if settings.druryStyle != .reverse && level == .two && strain == .diamonds {
+                    return .contract(.two, openMajor)
+                }
+                if level == .three && strain == openMajor { return .contract(.four, openMajor) }
+                if level == .four { return .pass }
             }
-
-            // Stayman: partner showed major
-            if let level = partnerRebidBid.level, let strain = partnerRebidBid.strain,
-               level == .two && strain.isMajor {
-                let fit = eval.length(strain.suit!)
-                if fit >= 4 && hcp >= 8  { return .contract(.four, strain) }
-                if fit >= 4              { return .contract(.three, strain) }
-                if hcp >= 10             { return .contract(.three, .notrump) }
-                if hcp >= 8              { return .contract(.two,   .notrump) }
-                return .pass
-            }
-            // Partner denied major (2♦)
-            if hcp >= 10 { return .contract(.three, .notrump) }
-            if hcp >= 8  { return .contract(.two,   .notrump) }
             return .pass
         }
 
-        // ── After Jacoby 2NT (I bid 2NT = game force with major fit) ─────────
-        if myResp == .contract(.two, .notrump) {
-            guard let partnerOpenMajor = partnerFirstBid?.strain, partnerOpenMajor.isMajor else { return .pass }
-            // Opener signed off at 4M (minimum, balanced) — nowhere to go
-            if partnerRebidBid == .contract(.four, partnerOpenMajor) { return .pass }
-            // Opener showed extras (3-level feature or 4-minor void) — consider slam
-            if hcp >= 16 {
-                let bw = Bid.contract(.four, .notrump)
-                if bw.isHigherThan(partnerRebidBid) { return bw }
+        // Which opening partner actually made decides whether my 2♣/2♦/2♥ was
+        // Stayman, a transfer, or a plain 2/1 response.
+        let partnerOpenedOneNT = partnerFirstBid == .contract(.one, .notrump)
+        let partnerOpenedOneMajor = partnerFirstBid?.level == .one
+            && partnerFirstBid?.strain?.isMajor == true
+
+        // ── After Stayman ───────────────────────────────────────────────────
+        if settings.staymanEnabled && partnerOpenedOneNT
+            && myResp == .contract(.two, .clubs) && !druryStart {
+            let forcing = settings.staymanVariant == .forcing
+
+            if let level = partnerRebidBid.level, let strain = partnerRebidBid.strain,
+               level == .two && strain.isMajor, let majorSuit = strain.suit {
+                let fit = eval.length(majorSuit)
+                if fit >= 4 && hcp >= 8  { return .contract(.four, strain) }
+                if fit >= 4              { return forcing ? .contract(.four, strain) : .contract(.three, strain) }
+                if hcp >= 10 || forcing  { return .contract(.three, .notrump) }
+                if hcp >= 8              { return .contract(.two,   .notrump) }
+                return .pass
             }
-            // Drive to game
+
+            // Partner denied a major (2♦)
+            if settings.smolen == .on && hcp >= 10 {
+                let sp = eval.length(.spades), h = eval.length(.hearts)
+                if sp >= 5 && h == 4 { return .contract(.three, .hearts) }  // Smolen
+                if h >= 5 && sp == 4 { return .contract(.three, .spades) }  // Smolen
+            }
+            if hcp >= 10 || forcing { return .contract(.three, .notrump) }
+            if hcp >= 8             { return .contract(.two,   .notrump) }
+            return .pass
+        }
+
+        // ── After Jacoby 2NT ────────────────────────────────────────────────
+        if settings.jacoby2NTEnabled && partnerOpenedOneMajor
+            && myResp == .contract(.two, .notrump),
+           let partnerOpenMajor = partnerFirstBid?.strain {
+            if partnerRebidBid == .contract(.four, partnerOpenMajor) { return .pass }
+            if hcp >= 16 {
+                let ask = keyCardAsk(trump: partnerOpenMajor.suit)
+                if ask.isHigherThan(partnerRebidBid) { return ask }
+            }
             let game = Bid.contract(.four, partnerOpenMajor)
             if game.isHigherThan(partnerRebidBid) { return game }
             return .pass
         }
 
-        // ── After Jacoby transfer to hearts (I bid 2♦) ───────────────────────
-        if myResp == .contract(.two, .diamonds) {
-            // Partner super-accepted (3♥)
-            if partnerRebidBid == .contract(.three, .hearts) {
-                return hcp >= 8 ? .contract(.four, .hearts) : .pass
+        // ── After a transfer ────────────────────────────────────────────────
+        if settings.jacobyTransfersEnabled && partnerOpenedOneNT && !druryStart {
+            if myResp == .contract(.two, .diamonds) {
+                if partnerRebidBid == .contract(.three, .hearts) {   // super-accept
+                    return hcp >= 8 ? .contract(.four, .hearts) : .pass
+                }
+                if hcp >= 10 { return .contract(.four, .hearts)  }
+                if hcp >= 8  { return .contract(.three, .hearts) }
+                return .pass
             }
-            if hcp >= 10 { return .contract(.four, .hearts)  }
-            if hcp >= 8  { return .contract(.three, .hearts) }
-            return .pass
+            if myResp == .contract(.two, .hearts) {
+                if partnerRebidBid == .contract(.three, .spades) {   // super-accept
+                    return hcp >= 8 ? .contract(.four, .spades) : .pass
+                }
+                if hcp >= 10 { return .contract(.four, .spades)  }
+                if hcp >= 8  { return .contract(.three, .spades) }
+                return .pass
+            }
+            // Four-suit transfer completions
+            if settings.transferStyle == .fourSuit,
+               myResp == .contract(.two, .spades) || myResp == .contract(.two, .notrump) {
+                return hcp >= 11 ? .contract(.three, .notrump) : .pass
+            }
         }
 
-        // ── After Jacoby transfer to spades (I bid 2♥) ───────────────────────
-        if myResp == .contract(.two, .hearts) {
-            if partnerRebidBid == .contract(.three, .spades) {
-                return hcp >= 8 ? .contract(.four, .spades) : .pass
-            }
-            if hcp >= 10 { return .contract(.four, .spades)  }
-            if hcp >= 8  { return .contract(.three, .spades) }
-            return .pass
-        }
-
-        // ── After 2/1 game force (my first bid was at 2-level) ───────────────
-        if let myLevel = myResp.level, myLevel == .two, let mySuit = myResp.strain?.suit {
-            let prLevel = partnerRebidBid.level
+        // ── After 2/1 game force ────────────────────────────────────────────
+        if let myLevel = myResp.level, myLevel == .two, let mySuit = myResp.strain?.suit,
+           let myStrain = myResp.strain {
+            let prLevel  = partnerRebidBid.level
             let prStrain = partnerRebidBid.strain
+            let highest  = ctx.highestCurrentBid ?? .contract(.one, .clubs)
+            // Without 2/1 as a game force, a minimum may stop below game.
+            let forcedToGame = settings.twoOverOneEnabled &&
+                !(settings.twoOverOneScope == .gameForcingUnpassed && ctx.iAmPassedHand)
 
-            let highest = ctx.highestCurrentBid ?? .contract(.one, .clubs)
-            // Partner raised my 2/1 suit
-            if prStrain == myResp.strain {
-                let game4 = Bid.contract(.four, myResp.strain!)
+            if prStrain == myStrain {
+                let game4 = Bid.contract(.four, myStrain)
                 if eval.length(mySuit) >= 5 && game4.isHigherThan(highest) { return game4 }
                 let threeNT = Bid.contract(.three, .notrump)
                 if threeNT.isHigherThan(highest) { return threeNT }
                 return .pass
             }
-            // Partner rebid own major at 3-level
             if prStrain?.isMajor == true, let prSuit = prStrain?.suit, let prLvl = prLevel,
-               prLvl == .three {
-                if eval.length(prSuit) >= 3 { return .contract(.four, prStrain!) }
-                if eval.length(mySuit) >= 5 { return .contract(.four, myResp.strain!) }
+               prLvl == .three, let prS = prStrain {
+                if eval.length(prSuit) >= 3 { return .contract(.four, prS) }
+                if eval.length(mySuit) >= 5 { return .contract(.four, myStrain) }
                 return .contract(.three, .notrump)
             }
-            // Partner bid 2NT (balanced minimum after 2/1)
             if prStrain == .notrump && prLevel == .two {
-                if eval.length(mySuit) >= 6 { return .contract(.four, myResp.strain!) }
-                return .contract(.three, .notrump)
+                if eval.length(mySuit) >= 6 { return .contract(.four, myStrain) }
+                if forcedToGame || hcp >= 13 { return .contract(.three, .notrump) }
+                return .pass
             }
-            // Generic: drive to game
-            if hcp >= 13 {
+            if forcedToGame || hcp >= 13 {
                 if eval.length(mySuit) >= 5 {
-                    let game4 = Bid.contract(.four, myResp.strain!)
+                    let game4 = Bid.contract(.four, myStrain)
                     if game4.isHigherThan(highest) { return game4 }
                 }
                 let threeNT = Bid.contract(.three, .notrump)
@@ -725,14 +996,28 @@ struct BiddingAI {
             }
         }
 
-        // ── After simple raise of my major (partner opened 1M, I raised 2M) ──
+        // ── After a simple raise of partner's major ─────────────────────────
         if let partnerOpenMajor = partnerFirstBid?.strain, partnerOpenMajor.isMajor,
            myResp.strain == partnerOpenMajor {
             if hcp >= 10 { return .contract(.four, partnerOpenMajor) }
             return .pass
         }
 
-        // ── General late-game push ────────────────────────────────────────────
+        // ── Checkback after partner's cheap rebid ───────────────────────────
+        if let checkback = checkbackBid(eval: eval, ctx: ctx, myResp: myResp,
+                                        partnerFirstBid: partnerFirstBid,
+                                        partnerRebidBid: partnerRebidBid) {
+            return checkback
+        }
+
+        // ── Fourth suit forcing ─────────────────────────────────────────────
+        if isFourthSuit(partnerRebidBid, ctx: ctx) {
+            if settings.fourthSuitStyle == .gameForcing || hcp >= 12 {
+                if eval.isBalanced { return .contract(.three, .notrump) }
+            }
+        }
+
+        // ── General late-game push ──────────────────────────────────────────
         if hcp >= 12 {
             if eval.length(.spades) >= 5 { return .contract(.four, .spades) }
             if eval.length(.hearts) >= 5 { return .contract(.four, .hearts) }
@@ -742,31 +1027,139 @@ struct BiddingAI {
         return .pass
     }
 
-    // MARK: - RKCB (Roman Key Card Blackwood)
+    /// Responder's artificial game try after opener's cheap rebid: New Minor
+    /// Forcing, or the XYZ relay when the partnership plays two-way new minor.
+    private func checkbackBid(
+        eval: HandEvaluation,
+        ctx: AuctionContext,
+        myResp: Bid,
+        partnerFirstBid: Bid?,
+        partnerRebidBid: Bid
+    ) -> Bid? {
+        let hcp = eval.hcp
+        guard hcp >= 11,
+              let openStrain = partnerFirstBid?.strain, openStrain.isMinor,
+              partnerFirstBid?.level == .one,
+              myResp.level == .one, myResp.strain?.isMajor == true else { return nil }
+
+        // XYZ: after two one-level bids, 2♣ is the weak/invitational relay and
+        // 2♦ is the game force.
+        if settings.xyzEnabled && partnerRebidBid.level == .one {
+            return hcp >= 13 ? .contract(.two, .diamonds) : .contract(.two, .clubs)
+        }
+
+        guard settings.nmfEnabled else { return nil }
+
+        // NMF is on over a 1NT rebid, and over a 2♣ rebid when agreed.
+        let triggered = partnerRebidBid == .contract(.one, .notrump)
+            || (settings.nmfInclude2C && partnerRebidBid == .contract(.two, .clubs))
+        guard triggered else { return nil }
+
+        let newMinor: Strain = openStrain == .clubs ? .diamonds : .clubs
+        let bid = Bid.contract(.two, newMinor)
+        guard bid.isHigherThan(partnerRebidBid) else {
+            // No room for the checkback — just place the contract
+            return hcp >= 13 ? .contract(.three, .notrump) : .contract(.two, .notrump)
+        }
+        return bid
+    }
+
+    /// Opener's answer to New Minor Forcing or an XYZ relay.
+    private func checkbackAnswer(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid? {
+        guard ctx.iOpenedTheAuction, ctx.myContractBidCount == 2,
+              let last = ctx.partnerLastBid, last.isSuitBid,
+              let myFirst = ctx.myBids.first(where: { $0.bid.isSuitBid })?.bid,
+              myFirst.strain?.isMinor == true,
+              let respMajor = ctx.partnerBids.first(where: { $0.bid.isSuitBid })?.bid.strain,
+              respMajor.isMajor, let respSuit = respMajor.suit else { return nil }
+
+        // XYZ relay: 2♣ simply asks opener to bid 2♦
+        if settings.xyzEnabled && last == .contract(.two, .clubs) {
+            return .contract(.two, .diamonds)
+        }
+
+        // Only a 1NT rebid (or an agreed 2♣ rebid) sets up New Minor Forcing —
+        // otherwise partner's minor is natural and must not be read as a relay.
+        let myRebid = ctx.myBids.filter { $0.bid.isSuitBid }.last?.bid
+        let nmfWasOn = myRebid == .contract(.one, .notrump)
+            || (settings.nmfInclude2C && myRebid == .contract(.two, .clubs))
+
+        guard settings.nmfEnabled, nmfWasOn, last.level == .two,
+              last.strain?.isMinor == true, last.strain != myFirst.strain else { return nil }
+
+        // Show 3-card support for partner's major, then a 4-card other major,
+        // otherwise sign back into notrump.
+        if eval.length(respSuit) >= 3 {
+            return eval.hcp >= 14 ? .contract(.three, respMajor) : .contract(.two, respMajor)
+        }
+        let otherMajor: Suit = respSuit == .hearts ? .spades : .hearts
+        if eval.length(otherMajor) >= 4 {
+            let b = Bid.contract(.two, otherMajor.strain)
+            if b.isHigherThan(last) { return b }
+        }
+        return .contract(.two, .notrump)
+    }
+
+    /// True when the bid names the one suit neither partner has mentioned.
+    private func isFourthSuit(_ bid: Bid, ctx: AuctionContext) -> Bool {
+        guard let strain = bid.strain, strain != .notrump else { return false }
+        let named = Set(ctx.auction.dropLast().compactMap { $0.bid.strain })
+        return !named.contains(strain) && named.count == 3
+    }
+
+    // MARK: - Slam bidding
 
     // Determine the agreed trump suit from the auction context
-    private static func agreedTrumpSuit(ctx: AuctionContext) -> Suit? {
-        // Prefer the most recently agreed major (both sides bid it)
+    private func agreedTrumpSuit(ctx: AuctionContext) -> Suit? {
         let allSuitBids = ctx.auction.filter { $0.bid.isSuitBid && $0.bid.strain != .notrump }
-        let suitCounts = Dictionary(grouping: allSuitBids, by: { $0.bid.strain! })
-            .mapValues { $0.count }
-        // Both sides agreed on a major
         for suit in [Suit.spades, .hearts] {
             if (ctx.myBids.contains   { $0.bid.strain == suit.strain }) &&
                (ctx.partnerBids.contains { $0.bid.strain == suit.strain }) {
                 return suit
             }
         }
-        // Partner bid a major
         if let s = ctx.partnerBids.last(where: { $0.bid.strain?.isMajor == true })?.bid.strain?.suit { return s }
-        // I bid a major
         if let s = ctx.myBids.last(where: { $0.bid.strain?.isMajor == true })?.bid.strain?.suit { return s }
-        // Any suit from auction
         return allSuitBids.last?.bid.strain?.suit
     }
 
+    /// Kickback moves the ask to four of the suit above trumps, freeing the
+    /// five-level. With spades agreed that is 4NT anyway.
+    private func kickbackAsk(for trump: Suit) -> Bid {
+        switch trump {
+        case .clubs:    return .contract(.four, .diamonds)
+        case .diamonds: return .contract(.four, .hearts)
+        case .hearts:   return .contract(.four, .spades)
+        case .spades:   return .contract(.four, .notrump)
+        }
+    }
+
+    /// The bid this partnership uses to ask for key cards.
+    private func keyCardAsk(trump: Suit?) -> Bid {
+        guard settings.kickbackEnabled, let t = trump else { return .contract(.four, .notrump) }
+        return kickbackAsk(for: t)
+    }
+
+    private func partnerAskedKeyCards(_ ctx: AuctionContext) -> Bool {
+        guard !ctx.myBids.isEmpty, let last = ctx.partnerLastBid else { return false }
+        if last == .contract(.four, .notrump) { return true }
+        if settings.kickbackEnabled, let t = agreedTrumpSuit(ctx: ctx), t != .spades {
+            return last == kickbackAsk(for: t)
+        }
+        return false
+    }
+
+    private func iAskedKeyCards(_ ctx: AuctionContext) -> Bool {
+        guard let last = ctx.myLastBid else { return false }
+        if last == .contract(.four, .notrump) { return true }
+        if settings.kickbackEnabled, let t = agreedTrumpSuit(ctx: ctx), t != .spades {
+            return last == kickbackAsk(for: t)
+        }
+        return false
+    }
+
     // Count RKCB key cards: 4 aces + king of agreed trump suit (max 5)
-    private static func keyCardCount(hand: [Card], trumpSuit: Suit?) -> Int {
+    private func keyCardCount(hand: [Card], trumpSuit: Suit?) -> Int {
         let aces = hand.filter { $0.rank == .ace }.count
         let trumpKing: Int = trumpSuit.map { suit in
             hand.contains { $0.suit == suit && $0.rank == .king } ? 1 : 0
@@ -774,46 +1167,74 @@ struct BiddingAI {
         return min(aces + trumpKing, 5)
     }
 
-    // Respond to partner's 4NT RKCB ask
-    private static func rkcbResponse(eval: HandEvaluation, hand: [Card], ctx: AuctionContext, flavor: RKCBFlavor) -> Bid {
+    /// Answer partner's ask, in whichever scheme the partnership plays.
+    private func slamAskResponse(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
         let trump = agreedTrumpSuit(ctx: ctx)
+
+        // Standard Blackwood counts aces only.
+        if !usesKeyCards {
+            let aces = hand.filter { $0.rank == .ace }.count
+            switch aces {
+            case 0, 4: return .contract(.five, .clubs)
+            case 1:    return .contract(.five, .diamonds)
+            case 2:    return .contract(.five, .hearts)
+            default:   return .contract(.five, .spades)
+            }
+        }
+
         let keyCards = keyCardCount(hand: hand, trumpSuit: trump)
         let hasQueenOfTrump = trump.map { suit in
             hand.contains { $0.suit == suit && $0.rank == .queen }
         } ?? false
 
-        switch flavor {
+        switch rkcbFlavor {
         case .f1430:
             switch keyCards {
-            case 1, 4: return .contract(.five, .clubs)     // 1 or 4
-            case 0, 3: return .contract(.five, .diamonds)  // 0 or 3
-            default:   // 2 or 5
-                return hasQueenOfTrump ? .contract(.five, .spades) : .contract(.five, .hearts)
+            case 1, 4: return .contract(.five, .clubs)
+            case 0, 3: return .contract(.five, .diamonds)
+            default:   return hasQueenOfTrump ? .contract(.five, .spades) : .contract(.five, .hearts)
             }
         case .f0314:
             switch keyCards {
-            case 0, 3: return .contract(.five, .clubs)     // 0 or 3
-            case 1, 4: return .contract(.five, .diamonds)  // 1 or 4
-            default:   // 2 or 5
-                return hasQueenOfTrump ? .contract(.five, .spades) : .contract(.five, .hearts)
+            case 0, 3: return .contract(.five, .clubs)
+            case 1, 4: return .contract(.five, .diamonds)
+            default:   return hasQueenOfTrump ? .contract(.five, .spades) : .contract(.five, .hearts)
             }
         }
     }
 
-    // After I bid 4NT (RKCB) and partner responded, place the contract
-    private static func rkcbFollowup(
+    /// Place the contract once partner has answered.
+    private func slamFollowup(
         response: Bid,
         eval: HandEvaluation,
         hand: [Card],
-        ctx: AuctionContext,
-        flavor: RKCBFlavor
+        ctx: AuctionContext
     ) -> Bid {
         let trump = agreedTrumpSuit(ctx: ctx)
+        let agreedStrain: Strain = trump.map { $0.strain } ?? .notrump
+
+        if !usesKeyCards {
+            let myAces = hand.filter { $0.rank == .ace }.count
+            let partnerAces: Int = {
+                switch response {
+                case .contract(.five, .clubs):    return 0   // 0 or 4 — read low
+                case .contract(.five, .diamonds): return 1
+                case .contract(.five, .hearts):   return 2
+                case .contract(.five, .spades):   return 3
+                default:                          return 0
+                }
+            }()
+            let total = myAces + partnerAces
+            if total < 3 { return .contract(.five, agreedStrain) }
+            if total == 4 && eval.hcp >= 15 { return .contract(.seven, agreedStrain) }
+            return .contract(.six, agreedStrain)
+        }
+
         let myKeyCards = keyCardCount(hand: hand, trumpSuit: trump)
 
-        // Decode partner's key card count (use the lower ambiguous value — conservative)
+        // Decode partner's count (take the lower ambiguous value — conservative)
         let partnerKeyCards: Int = {
-            switch (flavor, response) {
+            switch (rkcbFlavor, response) {
             case (.f1430, .contract(.five, .clubs)):    return 1  // 1 or 4
             case (.f1430, .contract(.five, .diamonds)): return 0  // 0 or 3
             case (.f0314, .contract(.five, .clubs)):    return 0  // 0 or 3
@@ -826,94 +1247,324 @@ struct BiddingAI {
 
         let hasPartnerQueenOfTrump = (response == .contract(.five, .spades))
         let totalKeyCards = myKeyCards + partnerKeyCards
-        let myHcp = eval.hcp
 
-        let agreedStrain: Strain = trump.map { $0.strain } ?? .notrump
+        if totalKeyCards < 4 { return .contract(.five, agreedStrain) }
 
-        // Missing 2+ key cards → sign off at the five-level
-        if totalKeyCards < 4 {
-            return .contract(.five, agreedStrain)
-        }
-
-        // Check for grand slam: all 5 key cards + trump queen present
         let hasQueenOfTrump = trump.map { suit in
             hand.contains { $0.suit == suit && $0.rank == .queen }
         } ?? false
         let trumpQueenAccounted = hasQueenOfTrump || hasPartnerQueenOfTrump || (totalKeyCards == 5)
 
-        if totalKeyCards == 5 && trumpQueenAccounted && myHcp >= 13 {
+        if totalKeyCards == 5 && trumpQueenAccounted && eval.hcp >= 13 {
             return .contract(.seven, agreedStrain)
         }
-
-        // Small slam
         return .contract(.six, agreedStrain)
+    }
+
+    // ── Exclusion RKCB ──────────────────────────────────────────────────────
+
+    /// Jump to five of a brand-new suit over an agreed fit — a natural bid there
+    /// essentially never occurs, which is what makes the ask readable.
+    private func exclusionAsk(ctx: AuctionContext, eval: HandEvaluation) -> Bid? {
+        guard settings.exclusionRKCB, eval.hcp >= 15,
+              let trump = agreedTrumpSuit(ctx: ctx), eval.length(trump) >= 4,
+              let highest = ctx.highestCurrentBid else { return nil }
+        let named = Set(ctx.auction.compactMap { $0.bid.strain })
+        for suit in Suit.allCases where suit != trump {
+            if eval.length(suit) == 0 && !named.contains(suit.strain) {
+                let ask = Bid.contract(.five, suit.strain)
+                if ask.isHigherThan(highest) { return ask }
+            }
+        }
+        return nil
+    }
+
+    private func partnerMadeExclusionAsk(_ ctx: AuctionContext) -> Suit? {
+        guard settings.exclusionRKCB, !ctx.myBids.isEmpty,
+              let last = ctx.partnerLastBid, last.level == .five,
+              let strain = last.strain, strain != .notrump, let suit = strain.suit,
+              agreedTrumpSuit(ctx: ctx) != nil else { return nil }
+        // Only a suit nobody has bid before now reads as the ask
+        let earlier = ctx.auction.dropLast()
+        if earlier.contains(where: { $0.bid.strain == strain }) { return nil }
+        return suit
+    }
+
+    private func exclusionResponse(hand: [Card], ctx: AuctionContext, excluding: Suit) -> Bid {
+        guard let ask = ctx.partnerLastBid else { return .pass }
+        let trump = agreedTrumpSuit(ctx: ctx)
+        // Key cards outside the excluded suit
+        let aces = hand.filter { $0.rank == .ace && $0.suit != excluding }.count
+        let trumpKing: Int = trump.map { suit in
+            hand.contains { $0.suit == suit && $0.rank == .king } ? 1 : 0
+        } ?? 0
+        let keyCards = min(aces + trumpKing, 4)
+        let hasQueen = trump.map { suit in
+            hand.contains { $0.suit == suit && $0.rank == .queen }
+        } ?? false
+
+        // Step responses: 0, 1, 2 without the trump queen, 2 with it
+        let step: Int
+        switch keyCards {
+        case 0:  step = 0
+        case 1:  step = 1
+        default: step = hasQueen ? 3 : 2
+        }
+        return stepBid(above: ask, steps: step)
+    }
+
+    private func stepBid(above ask: Bid, steps: Int) -> Bid {
+        var count = 0
+        for level in BidLevel.allCases {
+            for strain in Strain.allCases {
+                let b = Bid.contract(level, strain)
+                if b.isHigherThan(ask) {
+                    if count == steps { return b }
+                    count += 1
+                }
+            }
+        }
+        return .pass
+    }
+
+    // ── Control-showing cue bids ────────────────────────────────────────────
+
+    /// The cheapest side suit where I hold a control, at the level just above
+    /// the current bid. Italian style counts second-round controls too.
+    private func controlCueBid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext, trump: Suit) -> Bid? {
+        // Only ever cue once; after that, ask or bid the contract.
+        if ctx.myBids.contains(where: { entry in
+            guard let s = entry.bid.strain, let suit = s.suit else { return false }
+            return suit != trump && entry.bid.level == .four
+        }) { return nil }
+
+        guard let highest = ctx.highestCurrentBid else { return nil }
+
+        for suit in Suit.allCases where suit != trump {
+            let hasAce  = hand.contains { $0.suit == suit && $0.rank == .ace }
+            let isVoid  = eval.length(suit) == 0
+            let hasKing = hand.contains { $0.suit == suit && $0.rank == .king }
+            let isSingleton = eval.length(suit) == 1
+
+            let control = settings.cueBidStyle == .italian
+                ? (hasAce || isVoid || hasKing || isSingleton)
+                : (hasAce || isVoid)
+
+            guard control else { continue }
+            let cue = Bid.contract(.four, suit.strain)
+            if cue.isHigherThan(highest) && cue.isHigherThan(Bid.contract(.three, trump.strain)) {
+                return cue
+            }
+        }
+        return nil
     }
 
     // MARK: - Competitive Bidding
 
-    private static func competitiveBid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
+    /// True when the opponents, not us, opened the auction with 1NT.
+    private func opponentsOpenedOneNT(_ ctx: AuctionContext) -> Bool {
+        guard let opening = ctx.openingEntry else { return false }
+        return opening.bid == .contract(.one, .notrump)
+            && opening.seat != ctx.seat && opening.seat != ctx.partner
+    }
+
+    /// The partnership's agreed defence to a 1NT opening.
+    private func defendOneNT(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid? {
+        guard ctx.iHaveNotActed, settings.ntDefense != .natural else { return nil }
+        let hcp = eval.hcp
+        guard hcp >= 8 else { return nil }
+        let sp = eval.length(.spades), h = eval.length(.hearts)
+        let d  = eval.length(.diamonds), c = eval.length(.clubs)
+        let hasSixCardSuit = [sp, h, d, c].contains { $0 >= 6 }
+
+        switch settings.ntDefense {
+        case .landy:
+            if sp >= 4 && h >= 4 { return .contract(.two, .clubs) }
+            return nil
+
+        case .cappelletti:
+            if sp >= 4 && h >= 4                  { return .contract(.two, .diamonds) }
+            if sp >= 5 && (d >= 4 || c >= 4)      { return .contract(.two, .spades)   }
+            if h  >= 5 && (d >= 4 || c >= 4)      { return .contract(.two, .hearts)   }
+            if d >= 5 && c >= 5                   { return .contract(.two, .notrump)  }
+            if hasSixCardSuit                     { return .contract(.two, .clubs)    }
+            return nil
+
+        case .dont:
+            if h >= 5 && sp >= 5                          { return .contract(.two, .hearts)   }
+            if d >= 5 && (h >= 4 || sp >= 4)              { return .contract(.two, .diamonds) }
+            if c >= 5 && (d >= 4 || h >= 4 || sp >= 4)    { return .contract(.two, .clubs)    }
+            if hasSixCardSuit                             { return .double }
+            return nil
+
+        case .meckwell:
+            if d >= 5 && c >= 5              { return .double }
+            if sp >= 4 && h >= 4             { return .double }
+            if c >= 5 && (sp >= 4 || h >= 4) { return .contract(.two, .clubs)    }
+            if d >= 5 && (sp >= 4 || h >= 4) { return .contract(.two, .diamonds) }
+            if h  >= 5                       { return .contract(.two, .hearts)   }
+            if sp >= 5                       { return .contract(.two, .spades)   }
+            return nil
+
+        case .natural:
+            return nil
+        }
+    }
+
+    private func michaelsRangeOK(_ hcp: Int) -> Bool {
+        switch settings.michaelsStyle {
+        case .weakOrStrong: return (hcp >= 6 && hcp <= 11) || hcp >= 16
+        case .weakOnly:     return hcp >= 6 && hcp <= 11
+        case .strongOnly:   return hcp >= 13
+        }
+    }
+
+    /// Michaels and the Unusual 2NT both show 5-5 in a known pair of suits.
+    private func twoSuitedOvercall(
+        eval: HandEvaluation,
+        ctx: AuctionContext,
+        oppSuit: Suit,
+        highest: Bid
+    ) -> Bid? {
+        guard ctx.iHaveNotActed, michaelsRangeOK(eval.hcp) else { return nil }
+
+        if settings.unusual2NTEnabled {
+            let unbid = Suit.allCases.filter { $0 != oppSuit }.sorted { $0.rawValue < $1.rawValue }
+            if unbid.count >= 2, eval.length(unbid[0]) >= 5, eval.length(unbid[1]) >= 5 {
+                let nt2 = Bid.contract(.two, .notrump)
+                if nt2.isHigherThan(highest) { return nt2 }
+            }
+        }
+
+        if settings.michaelsEnabled {
+            let cue = Bid.contract(.two, oppSuit.strain)
+            if cue.isHigherThan(highest) {
+                if oppSuit.strain.isMinor {
+                    if eval.length(.hearts) >= 5 && eval.length(.spades) >= 5 { return cue }
+                } else {
+                    let otherMajor: Suit = oppSuit == .hearts ? .spades : .hearts
+                    let minorLong = eval.length(.clubs) >= 5 || eval.length(.diamonds) >= 5
+                    if eval.length(otherMajor) >= 5 && minorLong { return cue }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Is a negative double still takeout at this level?
+    private func negativeDoubleAllowed(_ overcall: Bid) -> Bool {
+        guard settings.negativeDoubleEnabled,
+              let lvl = overcall.level, let strain = overcall.strain else { return false }
+        switch settings.negativeDoubleLevel {
+        case .through2S: return lvl.rawValue < 2 || (lvl == .two   && strain <= .spades)
+        case .through3S: return lvl.rawValue < 3 || (lvl == .three && strain <= .spades)
+        case .through4H: return lvl.rawValue < 4 || (lvl == .four  && strain <= .hearts)
+        case .unlimited: return true
+        }
+    }
+
+    private func competitiveBid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
         let hcp = eval.hcp
         guard let highest = ctx.highestCurrentBid else {
             return openingBid(eval: eval, hand: hand, vulnerability: .neither)
         }
 
-        // ── Negative Double ───────────────────────────────────────────────────
-        // Partner opened 1-level, RHO overcalled, I haven't bid: shows unbid major(s), 6+ HCP
-        if ctx.myBids.isEmpty,
+        // ── Defence to their 1NT opening ────────────────────────────────────
+        if opponentsOpenedOneNT(ctx) {
+            if let bid = defendOneNT(eval: eval, hand: hand, ctx: ctx) {
+                if bid == .double || bid.isHigherThan(highest) { return bid }
+            }
+        }
+
+        // ── Transfers surviving interference, when that is the agreement ────
+        if settings.jacobyTransfersEnabled && settings.transfersOverInterference,
+           ctx.iHaveNotActed, ctx.partnerLastContractBid == .contract(.one, .notrump) {
+            if eval.length(.spades) >= 5 {
+                let t = Bid.contract(.two, .hearts)
+                if t.isHigherThan(highest) { return t }
+            }
+            if eval.length(.hearts) >= 5 {
+                let t = Bid.contract(.two, .diamonds)
+                if t.isHigherThan(highest) { return t }
+            }
+        }
+
+        // ── Lebensohl: partner opened 1NT and RHO overcalled at the 2-level ──
+        if settings.lebensohl != .off, ctx.iHaveNotActed,
+           ctx.partnerLastContractBid == .contract(.one, .notrump),
+           let rho = ctx.rightOpponentBids.last?.bid, rho.isSuitBid, rho.level == .two {
+            if hcp < 8 {
+                let relay = Bid.contract(.two, .notrump)
+                if relay.isHigherThan(highest) { return relay }
+            }
+            if hcp >= 10 {
+                let threeNT = Bid.contract(.three, .notrump)
+                if threeNT.isHigherThan(highest) { return threeNT }
+            }
+        }
+
+        // ── Negative Double ─────────────────────────────────────────────────
+        if ctx.iHaveNotActed,
            let partnerOpen = ctx.partnerLastContractBid,
            partnerOpen.level == .one,
            let partnerOpenSuit = partnerOpen.strain?.suit,
            let rhoLast = ctx.rightOpponentBids.last?.bid,
            rhoLast.isSuitBid,
            let rhoBidSuit = rhoLast.strain?.suit,
-           hcp >= 6 {
+           hcp >= 6,
+           negativeDoubleAllowed(rhoLast) {
             let hasUnbidMajor = [Suit.hearts, .spades].contains { suit in
                 suit != partnerOpenSuit && suit != rhoBidSuit && eval.length(suit) >= 4
             }
             if hasUnbidMajor { return .double }
         }
 
-        // ── Takeout Double ────────────────────────────────────────────────────
-        if ctx.myBids.isEmpty,
+        // ── Two-suited overcalls ────────────────────────────────────────────
+        if let oppSuit = highest.strain?.suit,
+           let twoSuited = twoSuitedOvercall(eval: eval, ctx: ctx, oppSuit: oppSuit, highest: highest) {
+            return twoSuited
+        }
+
+        // ── Takeout Double ──────────────────────────────────────────────────
+        if settings.takeoutDoubleEnabled,
+           ctx.iHaveNotActed,
            ctx.partnerBids.allSatisfy({ $0.bid == .pass }),
            let oppSuit = highest.strain?.suit,
-           hcp >= 12 {
+           hcp >= settings.takeoutDoubleMinHCP {
             let otherSuits = Suit.allCases.filter { $0 != oppSuit }
             let supportCount = otherSuits.filter { eval.length($0) >= 3 }.count
             let shortage = eval.length(oppSuit) <= 1
             if shortage && supportCount == 3 { return .double }
-            if eval.length(oppSuit) <= 2 && supportCount == 3 && hcp >= 13 { return .double }
-            if eval.length(oppSuit) <= 2 && supportCount >= 2 && hcp >= 16 { return .double }
+            if eval.length(oppSuit) <= 2 && supportCount == 3
+                && hcp >= settings.takeoutDoubleMinHCP + 1 { return .double }
+            if eval.length(oppSuit) <= 2 && supportCount >= 2
+                && hcp >= settings.takeoutDoubleMinHCP + 4 { return .double }
         }
 
-        // ── 1NT Overcall (15–18 HCP, balanced) ───────────────────────────────
-        if ctx.myBids.isEmpty && hcp >= 15 && hcp <= 18 && eval.isBalanced {
-            let nt1 = Bid.contract(.one, .notrump)
-            if nt1.isHigherThan(highest) { return nt1 }
-        }
-
-        // ── Simple Overcall (8–16 HCP, 5-card suit) ──────────────────────────
-        if ctx.myBids.isEmpty {
-            for suit in [Suit.spades, .hearts, .diamonds, .clubs] {
-                if eval.length(suit) >= 5 {
-                    let lvl1 = Bid.contract(.one, suit.strain)
-                    if lvl1.isHigherThan(highest) && hcp >= 8  { return lvl1 }
-                    let lvl2 = Bid.contract(.two, suit.strain)
-                    if lvl2.isHigherThan(highest) && hcp >= 11 { return lvl2 }
-                }
+        // ── Overcalls ───────────────────────────────────────────────────────
+        if settings.overcallEnabled && ctx.iHaveNotActed {
+            // 1NT overcall (15–18 balanced)
+            if hcp >= 15 && hcp <= 18 && eval.isBalanced {
+                let nt1 = Bid.contract(.one, .notrump)
+                if nt1.isHigherThan(highest) { return nt1 }
             }
-            // Preemptive jump overcall (weak hand, 6-card suit)
+            // Simple overcall, at the floor this partnership plays
+            for suit in [Suit.spades, .hearts, .diamonds, .clubs] where eval.length(suit) >= 5 {
+                let lvl1 = Bid.contract(.one, suit.strain)
+                if lvl1.isHigherThan(highest) && hcp >= overcall1LevelMin { return lvl1 }
+                let lvl2 = Bid.contract(.two, suit.strain)
+                if lvl2.isHigherThan(highest) && hcp >= settings.overcall2LevelMinHCP { return lvl2 }
+            }
+            // Preemptive jump overcall
             if hcp >= 5 && hcp <= 10 {
-                for suit in [Suit.spades, .hearts, .diamonds, .clubs] {
-                    if eval.length(suit) >= 6 {
-                        let jmp = Bid.contract(.two, suit.strain)
-                        if jmp.isHigherThan(highest) { return jmp }
-                    }
+                for suit in [Suit.spades, .hearts, .diamonds, .clubs] where eval.length(suit) >= 6 {
+                    let jmp = Bid.contract(.two, suit.strain)
+                    if jmp.isHigherThan(highest) { return jmp }
                 }
             }
         }
 
-        // ── Raise Partner's Suit ──────────────────────────────────────────────
+        // ── Raise Partner's Suit ────────────────────────────────────────────
         if let partnerSuit = ctx.partnerLastContractBid?.strain {
             let fit = eval.length(partnerSuit.suit ?? .clubs)
             if fit >= 3 && hcp >= 6 {
@@ -927,39 +1578,40 @@ struct BiddingAI {
         return .pass
     }
 
-    private static func lateBid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
+    private func lateBid(eval: HandEvaluation, hand: [Card], ctx: AuctionContext) -> Bid {
         let hcp = eval.hcp
         guard let highest = ctx.highestCurrentBid else { return .pass }
 
-        // Blackwood if we have a major fit and slam-zone values
+        // Slam exploration once a major fit is in place
         if let partnerBid = ctx.partnerLastContractBid,
            partnerBid.strain?.isMajor == true,
-           let suit = partnerBid.strain?.suit {
+           let suit = partnerBid.strain?.suit,
+           let partnerStrain = partnerBid.strain {
             let fit = eval.length(suit)
+
             if fit >= 3 && hcp >= 17 {
-                let bw = Bid.contract(.four, .notrump)
-                if bw.isHigherThan(highest) { return bw }
+                // Exclusion asks about everything except a void
+                if let excl = exclusionAsk(ctx: ctx, eval: eval) { return excl }
+                // A control cue below the ask keeps the auction informative
+                if let cue = controlCueBid(eval: eval, hand: hand, ctx: ctx, trump: suit) { return cue }
+                let ask = keyCardAsk(trump: suit)
+                if ask.isHigherThan(highest) { return ask }
             }
-            // Drive to game if fit established
             if fit >= 3 && hcp >= 10 {
-                let game4M = Bid.contract(.four, partnerBid.strain!)
+                let game4M = Bid.contract(.four, partnerStrain)
                 if game4M.isHigherThan(highest) { return game4M }
             }
         }
 
-        // Drive to 3NT with balanced hand and enough HCP
         if eval.isBalanced && hcp >= 13 {
             let threeNT = Bid.contract(.three, .notrump)
             if threeNT.isHigherThan(highest) { return threeNT }
         }
 
-        // Bid own suit if strong enough
         if hcp >= 14 {
-            for suit in [Suit.spades, .hearts, .diamonds, .clubs] {
-                if eval.length(suit) >= 5 {
-                    let b = Bid.contract(.three, suit.strain)
-                    if b.isHigherThan(highest) { return b }
-                }
+            for suit in [Suit.spades, .hearts, .diamonds, .clubs] where eval.length(suit) >= 5 {
+                let b = Bid.contract(.three, suit.strain)
+                if b.isHigherThan(highest) { return b }
             }
         }
 
@@ -968,7 +1620,7 @@ struct BiddingAI {
 
     // MARK: - Helpers
 
-    private static func splinterBid(openSuit: Suit, singletonSuit: Suit) -> Bid? {
+    private func splinterBid(openSuit: Suit, singletonSuit: Suit) -> Bid? {
         switch (openSuit, singletonSuit) {
         case (.hearts, .spades):   return .contract(.three, .spades)
         case (.hearts, .clubs):    return .contract(.four, .clubs)
@@ -980,7 +1632,7 @@ struct BiddingAI {
         }
     }
 
-    private static func highestSafeBid(eval: HandEvaluation, above: Bid?) -> Bid {
+    private func highestSafeBid(eval: HandEvaluation, above: Bid?) -> Bid {
         let above = above ?? .contract(.one, .clubs)
         for level in BidLevel.allCases {
             for strain in Strain.allCases {
@@ -993,7 +1645,7 @@ struct BiddingAI {
 
     // MARK: - Bid Explanation
 
-    static func bidNote(bid: Bid, seat: Seat, auction: [(seat: Seat, bid: Bid)]) -> String {
+    func bidNote(bid: Bid, seat: Seat, auction: [(seat: Seat, bid: Bid)]) -> String {
         if bid == .pass { return "" }
         if bid == .redouble { return "Redouble: confident the contract can be made" }
 
@@ -1001,25 +1653,33 @@ struct BiddingAI {
 
         // Double
         if bid == .double {
-            if ctx.myBids.isEmpty && ctx.partnerBids.allSatisfy({ $0.bid == .pass }) {
-                return "Takeout double: 12+ HCP, short in their suit, support for unbid suits"
+            if opponentsOpenedOneNT(ctx) && settings.ntDefense == .dont {
+                return "DONT double: a one-suited hand — partner bids 2♣ to ask which"
             }
-            if ctx.myBids.isEmpty && ctx.partnerLastContractBid != nil && !ctx.opponentIntervened {
+            if opponentsOpenedOneNT(ctx) && settings.ntDefense == .meckwell {
+                return "Meckwell double: both minors, or a major — partner relays to find out"
+            }
+            if ctx.iHaveNotActed && ctx.partnerBids.allSatisfy({ $0.bid == .pass }) {
+                return "Takeout double: \(settings.takeoutDoubleMinHCP)+ HCP, short in their suit, support for the unbid suits"
+            }
+            if settings.supportDoubles && ctx.iHaveNotActed
+                && ctx.partnerLastContractBid != nil && !ctx.opponentIntervened {
                 return "Support double: exactly 3-card support for partner's suit"
             }
-            return "Negative double: 6+ HCP, showing unbid major(s)"
+            return "Negative double: 6+ HCP, showing the unbid major(s) — takeout \(settings.negativeDoubleLevel.rawValue.lowercased())"
         }
 
         guard let bidLevel = bid.level, let bidStrain = bid.strain else { return "" }
 
-        // ── Opening bids ──────────────────────────────────────────────────────
+        // ── Opening bids ────────────────────────────────────────────────────
         if ctx.isOpeningPosition {
             switch (bidLevel, bidStrain) {
             case (.one, .notrump): return "1NT opening: 15-17 HCP, balanced"
-            case (.two, .clubs):   return "Strong 2♣: 22+ HCP (or 20+ with long suit)"
+            case (.two, .clubs):   return "Strong 2♣: 22+ HCP (or 20+ with a long suit)"
             case (.two, .notrump): return "2NT opening: 20-21 HCP, balanced"
             case (.two, let s) where s != .clubs:
-                return "Weak 2\(s.display): 5-10 HCP, good 6-card \(s.display) suit"
+                let r = settings.weakTwoStyle.hcpRange
+                return "Weak 2\(s.display): \(r.lowerBound)-\(r.upperBound) HCP, 6-card \(s.display) suit (\(settings.weakTwoStyle.rawValue))"
             case (.three, let s):
                 return "Preempt 3\(s.display): 4-9 HCP, 7-card \(s.display) suit"
             default:
@@ -1027,7 +1687,12 @@ struct BiddingAI {
             }
         }
 
-        // ── Responder's first bid ─────────────────────────────────────────────
+        // ── Defence to their 1NT ────────────────────────────────────────────
+        if opponentsOpenedOneNT(ctx) && ctx.myBids.count <= 1 && settings.ntDefense != .natural {
+            return "\(settings.ntDefense.rawValue) defence to 1NT: \(settings.ntDefense.detail)"
+        }
+
+        // ── Responder's first bid ───────────────────────────────────────────
         if ctx.partnerOpenedCleanly,
            let partnerOpen = ctx.partnerLastContractBid,
            let openLevel = partnerOpen.level, let openStrain = partnerOpen.strain {
@@ -1035,13 +1700,26 @@ struct BiddingAI {
             // After 1NT
             if openLevel == .one && openStrain == .notrump {
                 switch bid {
-                case .contract(.two, .clubs):     return "Stayman: 8+ HCP, asking for 4-card major"
+                case .contract(.two, .clubs):
+                    return "Stayman (\(settings.staymanVariant.rawValue)): asking for a 4-card major"
                 case .contract(.two, .diamonds):  return "Jacoby Transfer → ♥: 5+ hearts"
                 case .contract(.two, .hearts):    return "Jacoby Transfer → ♠: 5+ spades"
-                case .contract(.two, .notrump):   return "Invitational: 8-9 HCP, no 4-card major"
+                case .contract(.two, .spades):
+                    return settings.transferStyle == .fourSuit
+                        ? "Four-suit transfer → ♣: 6+ clubs, weak"
+                        : "2♠: natural, invitational"
+                case .contract(.two, .notrump):
+                    return settings.transferStyle == .fourSuit
+                        ? "Four-suit transfer → ♦: 6+ diamonds, weak"
+                        : "Invitational: 8-9 HCP, no 4-card major"
                 case .contract(.three, .notrump): return "3NT: 10-14 HCP, balanced — to play"
+                case .contract(.four, .clubs):    return "Gerber 4♣: asking how many aces"
+                case .contract(.four, .diamonds): return "Texas Transfer → ♥: 6+ hearts, game values"
                 case .contract(.four, .notrump):  return "Quantitative 4NT: 15+ HCP, slam invite"
-                case .contract(.four, .hearts):   return "4♥: 6+ hearts, game values"
+                case .contract(.four, .hearts):
+                    return settings.texasTransfers == .on
+                        ? "Texas Transfer → ♠: 6+ spades, game values"
+                        : "4♥: 6+ hearts, game values"
                 case .contract(.four, .spades):   return "4♠: 6+ spades, game values"
                 default: return ""
                 }
@@ -1050,10 +1728,11 @@ struct BiddingAI {
             // After 2NT
             if openLevel == .two && openStrain == .notrump {
                 switch bid {
-                case .contract(.three, .clubs):    return "Puppet Stayman: 4+ cards in a major"
+                case .contract(.three, .clubs):    return "Puppet Stayman: asking for a 5-card major first"
                 case .contract(.three, .diamonds): return "Jacoby Transfer → ♥: 5+ hearts"
                 case .contract(.three, .hearts):   return "Jacoby Transfer → ♠: 5+ spades"
                 case .contract(.three, .notrump):  return "3NT: balanced, to play"
+                case .contract(.four, .clubs):     return "Gerber 4♣: asking how many aces"
                 case .contract(.six, .notrump):    return "6NT: 10+ HCP, balanced slam"
                 default: return ""
                 }
@@ -1066,10 +1745,14 @@ struct BiddingAI {
                 return "Positive response to 2♣: 8+ HCP, 5-card \(bidStrain.display) suit"
             }
 
-            // After weak 2
+            // After a weak two
             if openLevel == .two && openStrain.isMajor {
-                if bid == .contract(.two, .notrump) { return "Ogust 2NT: asking opener to describe strength/quality" }
-                if bidStrain == openStrain { return "Preemptive raise of \(openStrain.display) opening" }
+                if bid == .contract(.two, .notrump) {
+                    return settings.weakTwoResponse == .feature
+                        ? "2NT: asking opener to show an outside ace or king"
+                        : "Ogust 2NT: asking about suit quality and overall strength"
+                }
+                if bidStrain == openStrain { return "Preemptive raise of the \(openStrain.display) opening" }
                 return "Game try: 14+ HCP"
             }
 
@@ -1078,32 +1761,34 @@ struct BiddingAI {
                 if bid == .contract(.two, .notrump) {
                     return "Jacoby 2NT: 13+ HCP, 4+ \(openStrain.display) — game force"
                 }
-                if bid == .contract(.two, .clubs) {
-                    return "Reverse Drury: 3+ \(openStrain.display), limit raise (10-11 TP)"
+                if bid == .contract(.two, .clubs) && ctx.iAmPassedHand && settings.druryEnabled {
+                    return "\(settings.druryStyle.rawValue): 3+ \(openStrain.display), 10-12 points by a passed hand"
                 }
-                if bid == .contract(.four, openStrain) {
-                    return "Game raise: 13+ TP, 3+ \(openStrain.display)"
+                if bid == .contract(.two, .diamonds) && ctx.iAmPassedHand
+                    && settings.druryEnabled && settings.druryStyle == .twoWay {
+                    return "Two-Way Drury 2♦: 4+ \(openStrain.display), 10-12 points by a passed hand"
                 }
-                if bid == .contract(.two, openStrain) {
-                    return "Simple raise: 6-9 HCP, 3+ \(openStrain.display)"
-                }
-                if bid == .contract(.three, openStrain) {
-                    return "Preemptive raise: 4+ \(openStrain.display), weak hand"
-                }
+                if bid == .contract(.four, openStrain) { return "Game raise: 13+ TP, 3+ \(openStrain.display)" }
+                if bid == .contract(.two, openStrain)  { return "Simple raise: 6-9 HCP, 3+ \(openStrain.display)" }
+                if bid == .contract(.three, openStrain) { return "Limit raise: 10-12 points, 3+ \(openStrain.display)" }
                 if bid == .contract(.four, .notrump) {
-                    return "RKCB (4NT): key card ask with \(openStrain.display) agreed"
+                    return usesKeyCards
+                        ? "RKCB (4NT): key card ask with \(openStrain.display) agreed"
+                        : "Blackwood 4NT: asking how many aces"
                 }
                 if bid == .contract(.one, .notrump) {
-                    return "1NT: semi-forcing, 6-12 HCP, no \(openStrain.display) fit"
-                }
-                if bidLevel == .two && bidStrain != openStrain {
-                    return "2/1 Game Force: 13+ HCP, 5-card \(bidStrain.display)"
+                    return settings.oneNTResponseStyle == .forcing
+                        ? "1NT forcing: 6-12 HCP, no \(openStrain.display) fit — opener must bid again"
+                        : "1NT semi-forcing: 6-12 HCP, no \(openStrain.display) fit"
                 }
                 let splinterBids: [Bid] = openSuit == .hearts
                     ? [.contract(.three, .spades), .contract(.four, .clubs), .contract(.four, .diamonds)]
                     : [.contract(.four, .hearts), .contract(.four, .clubs), .contract(.four, .diamonds)]
-                if splinterBids.contains(bid) {
-                    return "Splinter: 4+ \(openStrain.display), singleton/void in \(bidStrain.display)"
+                if settings.splinterEnabled && splinterBids.contains(bid) {
+                    return "Splinter: 4+ \(openStrain.display), singleton/void in \(bidStrain.display), \(settings.splinterMinHCP)+ HCP"
+                }
+                if bidLevel == .two && bidStrain != openStrain && settings.twoOverOneEnabled {
+                    return "2/1 Game Force: 13+ HCP, 5-card \(bidStrain.display)"
                 }
                 if bidLevel == .one { return "New suit: 4+ \(bidStrain.display), 6+ HCP" }
                 return ""
@@ -1114,6 +1799,11 @@ struct BiddingAI {
                 if bidLevel == .one && bidStrain.isMajor {
                     return "New major: 4+ \(bidStrain.display), 6+ HCP"
                 }
+                if bidStrain == openStrain && settings.minorRaiseStyle == .inverted {
+                    return bidLevel == .two
+                        ? "Inverted minor raise: 10+ HCP, 5+ \(openStrain.display) — forcing"
+                        : "Inverted jump raise: preemptive, under 10 HCP"
+                }
                 if bid == .contract(.one, .notrump)   { return "1NT: 6-9 HCP, no 4-card major" }
                 if bid == .contract(.two, .notrump)   { return "2NT: 10-12 HCP, balanced" }
                 if bid == .contract(.three, .notrump) { return "3NT: 13-15 HCP, balanced — to play" }
@@ -1122,58 +1812,99 @@ struct BiddingAI {
             }
         }
 
-        // ── Opener's rebid after Jacoby 2NT ───────────────────────────────────
+        // ── Opener's rebid after Jacoby 2NT ─────────────────────────────────
         if ctx.iRebidding,
            let myOpen = ctx.myLastContractBid,
            myOpen.level == .one, myOpen.strain?.isMajor == true,
            let openStrain = myOpen.strain,
            ctx.partnerLastContractBid == .contract(.two, .notrump) {
-            if bid == .contract(.four, openStrain) {
-                return "Jacoby 2NT reply: balanced minimum — sign off at game"
-            }
-            if bid == .contract(.three, openStrain) {
-                return "Jacoby 2NT reply: 6-card \(openStrain.display) suit"
-            }
-            if bidLevel == .three {
-                return "Jacoby 2NT reply: singleton in \(bidStrain.display)"
-            }
+            if bid == .contract(.four, openStrain)  { return "Jacoby 2NT reply: balanced minimum — sign off at game" }
+            if bid == .contract(.three, openStrain) { return "Jacoby 2NT reply: 6-card \(openStrain.display) suit" }
+            if bidLevel == .three                   { return "Jacoby 2NT reply: singleton in \(bidStrain.display)" }
             if bidLevel == .four && bidStrain != openStrain {
-                return "Jacoby 2NT reply: void in \(bidStrain.display)"
+                return "Jacoby 2NT reply: 5-card side suit in \(bidStrain.display)"
             }
             return ""
         }
 
-        // ── RKCB key card response ────────────────────────────────────────────
-        if ctx.partnerAskedForAces && bidLevel == .five {
+        // ── Ogust replies ───────────────────────────────────────────────────
+        if ctx.iRebidding, ctx.partnerLastContractBid == .contract(.two, .notrump),
+           ctx.myLastContractBid?.level == .two, settings.weakTwoResponse == .ogust,
+           bidLevel == .three {
             switch bidStrain {
-            case .clubs:    return "RKCB 5♣: 1 or 4 key cards (1430) / 0 or 3 (0314)"
-            case .diamonds: return "RKCB 5♦: 0 or 3 key cards (1430) / 1 or 4 (0314)"
+            case .clubs:    return "Ogust 3♣: bad suit, bad hand"
+            case .diamonds: return "Ogust 3♦: bad suit, good hand"
+            case .hearts:   return "Ogust 3♥: good suit, bad hand"
+            case .spades:   return "Ogust 3♠: good suit, good hand"
+            default: break
+            }
+        }
+
+        // ── Key card response ───────────────────────────────────────────────
+        if ctx.partnerAskedForAces && bidLevel == .five {
+            if !usesKeyCards {
+                switch bidStrain {
+                case .clubs:    return "Blackwood 5♣: 0 or 4 aces"
+                case .diamonds: return "Blackwood 5♦: 1 ace"
+                case .hearts:   return "Blackwood 5♥: 2 aces"
+                case .spades:   return "Blackwood 5♠: 3 aces"
+                default: return ""
+                }
+            }
+            let low  = rkcbFlavor == .f1430 ? "1 or 4" : "0 or 3"
+            let high = rkcbFlavor == .f1430 ? "0 or 3" : "1 or 4"
+            switch bidStrain {
+            case .clubs:    return "RKCB 5♣: \(low) key cards"
+            case .diamonds: return "RKCB 5♦: \(high) key cards"
             case .hearts:   return "RKCB 5♥: 2 key cards, no queen of trump"
             case .spades:   return "RKCB 5♠: 2 key cards + queen of trump"
             default: return ""
             }
         }
 
-        // ── RKCB ask ──────────────────────────────────────────────────────────
+        // ── The ask itself ──────────────────────────────────────────────────
         if bid == .contract(.four, .notrump) {
-            return "RKCB (4NT): asking for key cards — 4 aces + king of agreed trump suit"
+            return usesKeyCards
+                ? "RKCB (4NT): asking for key cards — 4 aces plus the king of trumps"
+                : "Blackwood (4NT): asking how many aces"
+        }
+        if settings.kickbackEnabled, bidLevel == .four,
+           let t = agreedTrumpSuit(ctx: ctx), t != .spades, bid == kickbackAsk(for: t) {
+            return "Kickback \(bid.display): key card ask with \(t.strain.display) agreed"
+        }
+        if settings.exclusionRKCB, bidLevel == .five, partnerMadeExclusionAsk(ctx) == nil,
+           isBrandNewSuit(bid, ctx: ctx) {
+            return "Exclusion RKCB \(bid.display): key card ask ignoring \(bidStrain.display) — void there"
         }
 
-        // ── Slam bids ─────────────────────────────────────────────────────────
+        // ── Slam bids ───────────────────────────────────────────────────────
         if bidLevel == .six   { return "Small slam: contract for 12 of 13 tricks" }
         if bidLevel == .seven { return "Grand slam: contract for all 13 tricks" }
 
-        // ── Competitive first bid ─────────────────────────────────────────────
-        if ctx.opponentIntervened && ctx.myBids.isEmpty {
+        // ── Competitive first bid ───────────────────────────────────────────
+        if ctx.opponentIntervened && ctx.iHaveNotActed {
+            if bid == .contract(.two, .notrump) && settings.unusual2NTEnabled {
+                return "Unusual 2NT: at least 5-5 in the two lowest unbid suits"
+            }
+            if settings.michaelsEnabled, bidLevel == .two,
+               let opp = ctx.highestCurrentBid?.strain, opp == bidStrain {
+                return "Michaels cue bid (\(settings.michaelsStyle.rawValue)): a 5-5 two-suiter"
+            }
             if bidStrain == .notrump {
                 return "\(bidLevel.rawValue)NT overcall: 15-18 HCP, balanced, stopper in their suit"
             }
             if bidLevel.rawValue >= 3 {
                 return "Jump overcall: 5-10 HCP, 6-card \(bidStrain.display) suit — preemptive"
             }
-            return "Overcall: 8+ HCP, 5-card \(bidStrain.display) suit"
+            let floor = bidLevel == .one ? overcall1LevelMin : settings.overcall2LevelMinHCP
+            return "Overcall: \(floor)+ HCP, 5-card \(bidStrain.display) suit (\(settings.overcallStyle.rawValue))"
         }
 
         return ""
+    }
+
+    private func isBrandNewSuit(_ bid: Bid, ctx: AuctionContext) -> Bool {
+        guard let strain = bid.strain, strain != .notrump else { return false }
+        return !ctx.auction.contains { $0.bid.strain == strain }
     }
 }

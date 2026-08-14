@@ -67,13 +67,10 @@ class GameState: ObservableObject {
     let humanSeat: Seat = .south
     /// Defaults on: when the human would be dummy, they play the declarer's hand instead.
     @Published var switchSeatsForDeclarer: Bool = true
+    /// The partnership's convention card. The bidding engine reads it directly,
+    /// so changing a setting changes how the AI bids on the very next call.
     @Published var conventionSettings: ConventionSettings = ConventionSettings.load() {
         didSet { conventionSettings.save() }
-    }
-
-    /// Derived from the slam-ask setting so there is a single source of truth.
-    var rkcbFlavor: RKCBFlavor {
-        conventionSettings.slamAskStyle == .rkcb0314 ? .f0314 : .f1430
     }
     @Published var bidWarning: BidAnalysis? = nil
 
@@ -467,16 +464,16 @@ class GameState: ObservableObject {
         let hand     = hands[bidder] ?? []
         let snapshot = auction.map { (seat: $0.seat, bid: $0.bid) }
         let vul      = vulnerability
-        let flavor   = rkcbFlavor
+        // The engine bids the partnership's actual convention card.
+        let ai       = BiddingAI(settings: conventionSettings)
 
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            let bid = BiddingAI.selectBid(hand: hand, seat: bidder,
-                                          auction: snapshot, vulnerability: vul,
-                                          rkcbFlavor: flavor)
+            let bid = ai.selectBid(hand: hand, seat: bidder,
+                                   auction: snapshot, vulnerability: vul)
             self.aiThinking = false
             let safeBid = self.legalBids.contains(bid) ? bid : .pass
-            self.biddingNote = BiddingAI.bidNote(bid: safeBid, seat: bidder, auction: snapshot)
+            self.biddingNote = ai.bidNote(bid: safeBid, seat: bidder, auction: snapshot)
             self.auction.append(AuctionEntry(seat: bidder, bid: safeBid))
             self.updatePracticeHint()
             if self.biddingIsComplete { self.finalizeBidding() }
