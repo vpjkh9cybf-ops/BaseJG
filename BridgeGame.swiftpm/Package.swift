@@ -15,15 +15,15 @@ let package = Package(
             bundleIdentifier: "com.bridge.game",
             displayVersion: "1.0",
             bundleVersion: "1",
+            // The table is a landscape iPad layout: a fixed-width score column
+            // plus West / centre / East columns and a 13-card fan. It has no
+            // portrait or iPhone form, so those are not advertised.
             supportedDeviceFamilies: [
-                .pad,
-                .phone
+                .pad
             ],
             supportedInterfaceOrientations: [
-                .portrait,
-                .landscapeRight,
                 .landscapeLeft,
-                .portraitUpsideDown(.when(deviceFamilies: [.pad]))
+                .landscapeRight
             ]
         )
     ],
