@@ -43,6 +43,24 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
         }
     }
 
+    // The convention only actually comes up if the opponents stay out of the
+    // auction — an overcall from East diverts the sequence and wastes the deal.
+    func opponentsQualify(east: [Card], west: [Card]) -> Bool {
+        switch self {
+        case .weakTwo:
+            // South is dealer, so the drill bid is made before anyone else acts.
+            return true
+        default:
+            let ee = HandEvaluator.evaluate(east)
+            guard ee.hcp <= 11 else { return false }
+            // Values plus a long suit is an overcall waiting to happen.
+            if ee.hcp >= 8 && Suit.allCases.contains(where: { ee.length($0) >= 6 }) {
+                return false
+            }
+            return true
+        }
+    }
+
     // Does South's hand qualify to use the convention given North's hand?
     func southQualifies(_ south: [Card], north: [Card]) -> Bool {
         let se = HandEvaluator.evaluate(south)

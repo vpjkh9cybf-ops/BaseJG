@@ -6,6 +6,8 @@ struct GameTableView: View {
     @State private var showAuction: Bool = false
     @State private var showSettings: Bool = false
 
+    private let scoreColumnW: CGFloat = 145
+
     private var isBiddingPhase: Bool { game.phase == .bidding }
     private var trump: Suit? { game.contract?.strain.suit }
 
@@ -19,41 +21,70 @@ struct GameTableView: View {
         dummyRevealed && (game.dummy == .east || game.dummy == .west)
     }
 
-    // North is displayed wide when it's the dummy or when switchSeats has N as declarer
+    // North is displayed wide when it's the dummy or when North is declarer
     private var isNorthWideDummy: Bool {
         dummyRevealed && game.dummy == .north && game.contract?.declarer == .south
     }
     private var isNorthWideDeclarer: Bool {
         game.switchSeatsForDeclarer && game.contract?.declarer == .north && game.phase == .playing
     }
-    // Also wide when North is declarer (seats not switched) — suit-row layout is too tall
-    // for the small northRatio frame; use the horizontal fan so all cards and indices are visible
+    // Also wide when North is declarer but seats were not switched — the suit-row
+    // layout is too tall for the small north frame to show every index.
     private var isNorthFaceUpDeclarer: Bool {
         game.contract?.declarer == .north &&
         !game.switchSeatsForDeclarer && game.phase == .playing
     }
     private var northIsWide: Bool { isNorthWideDummy || isNorthWideDeclarer || isNorthFaceUpDeclarer }
 
-    // Layout ratios for the north / mid / south rows
+    // MARK: - Layout ratios for the north / mid / south rows
+
     private var northRatio: Double {
-        if isBiddingPhase        { return 0.13 }
-        if northIsWide           { return 0.22 }
+        if isBiddingPhase { return 0.13 }
+        if northIsWide    { return 0.22 }
         return 0.14
     }
     private var midRatio: Double {
-        if isBiddingPhase        { return 0.58 }
-        if northIsWide           { return 0.54 }
+        if isBiddingPhase { return 0.58 }
+        if northIsWide    { return 0.53 }
         return 0.56
     }
     private var southRatio: Double {
-        if isBiddingPhase        { return 0.29 }
-        if northIsWide           { return 0.24 }
+        if isBiddingPhase { return 0.29 }
+        if northIsWide    { return 0.25 }
         return 0.30
     }
     private var layoutKey: String {
-        if isBiddingPhase  { return "bidding" }
-        if northIsWide     { return "northWide" }
+        if isBiddingPhase { return "bidding" }
+        if northIsWide    { return "northWide" }
         return "playing"
+    }
+
+    /// Width of a side (East/West) column. The revealed dummy gets a real column
+    /// but is hard-capped so it can never encroach on the trick area.
+    private func sideWidth(_ seat: Seat, mainW: CGFloat) -> CGFloat {
+        guard ewDummyRevealed else { return mainW * 0.20 }
+        if game.dummy == seat { return min(300, mainW * 0.34) }
+        return mainW * 0.11
+    }
+
+    /// Box the East/West dummy is allowed to paint into.
+    private func dummySize(_ seat: Seat, geo: GeometryProxy) -> CGSize {
+        let mainW = geo.size.width - scoreColumnW
+        let w = sideWidth(seat, mainW: mainW) - 10
+        let h = geo.size.height * midRatio - 30   // seat label + padding
+        return CGSize(width: max(90, w), height: max(90, h))
+    }
+
+    /// Space left in the middle once both side columns are subtracted.
+    private func trickSize(geo: GeometryProxy) -> CGSize {
+        let mainW = geo.size.width - scoreColumnW
+        let w = mainW - sideWidth(.west, mainW: mainW) - sideWidth(.east, mainW: mainW) - 16
+        let h = geo.size.height * midRatio - 44    // status line + padding
+        return CGSize(width: max(140, w), height: max(150, h))
+    }
+
+    private func fanHeight(_ ratio: Double, geo: GeometryProxy, chrome: CGFloat) -> CGFloat {
+        max(90, min(180, geo.size.height * ratio - chrome))
     }
 
     private func isBidding(_ seat: Seat) -> Bool {
@@ -67,6 +98,8 @@ struct GameTableView: View {
         return isVulnerable(seat) ? .red : .white.opacity(0.85)
     }
 
+    // MARK: - Body
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -74,38 +107,11 @@ struct GameTableView: View {
                     .ignoresSafeArea()
 
                 HStack(alignment: .top, spacing: 0) {
-                    // Score column — always visible on far left
                     scoreColumn
-                        .frame(width: 145)
+                        .frame(width: scoreColumnW)
                         .frame(maxHeight: .infinity)
 
-                    // Main play area
-                    VStack(spacing: 0) {
-                        northArea
-                            .frame(height: geo.size.height * northRatio)
-
-                        HStack(alignment: .top, spacing: 0) {
-                            let mainW = geo.size.width - 145
-                            let westW = game.dummy == .west && ewDummyRevealed
-                                ? mainW * 0.40
-                                : ewDummyRevealed ? mainW * 0.10 : mainW * 0.20
-                            let eastW = game.dummy == .east && ewDummyRevealed
-                                ? mainW * 0.40
-                                : ewDummyRevealed ? mainW * 0.10 : mainW * 0.20
-                            westArea.frame(width: westW)
-                            centerArea.frame(maxWidth: .infinity)
-                            eastArea.frame(width: eastW)
-                        }
-                        .frame(height: geo.size.height * midRatio)
-                        .clipped()
-
-                        southArea
-                            .frame(height: geo.size.height * southRatio)
-                    }
-                    .animation(.easeInOut(duration: 0.25), value: layoutKey)
-                    .onChange(of: isBiddingPhase) { newVal in
-                        if newVal { showAuction = false }
-                    }
+                    tableColumn(geo: geo)
                 }
 
                 overlayLayer
@@ -149,25 +155,39 @@ struct GameTableView: View {
         }
     }
 
+    private func tableColumn(geo: GeometryProxy) -> some View {
+        let mainW = geo.size.width - scoreColumnW
+        return VStack(spacing: 0) {
+            northArea(geo: geo)
+                .frame(height: geo.size.height * northRatio)
+
+            HStack(alignment: .top, spacing: 0) {
+                westArea(geo: geo).frame(width: sideWidth(.west, mainW: mainW))
+                centerArea(geo: geo).frame(maxWidth: .infinity)
+                eastArea(geo: geo).frame(width: sideWidth(.east, mainW: mainW))
+            }
+            .frame(height: geo.size.height * midRatio)
+            .clipped()
+
+            southArea(geo: geo)
+                .frame(height: geo.size.height * southRatio)
+        }
+        .animation(.easeInOut(duration: 0.25), value: layoutKey)
+        .onChange(of: isBiddingPhase) { newVal in
+            if newVal { showAuction = false }
+        }
+    }
+
     // MARK: - Score column (far left)
+
+    private var practiceBadgeText: String {
+        game.practiceConvention?.rawValue ?? "Free deal"
+    }
 
     private var scoreColumn: some View {
         VStack(spacing: 6) {
-            if let convention = game.practiceConvention {
-                VStack(spacing: 2) {
-                    Text("PRACTICE")
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundColor(.black)
-                    Text(convention.rawValue)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.black)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity)
-                .background(Color.yellow)
-                .cornerRadius(6)
+            if !game.practiceConventions.isEmpty {
+                practiceBadge
             }
             ScorePadView()
 
@@ -185,6 +205,28 @@ struct GameTableView: View {
         }
         .padding(.horizontal, 4)
         .padding(.top, 8)
+    }
+
+    private var practiceBadge: some View {
+        VStack(spacing: 2) {
+            Text("PRACTICE")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(.black)
+            Text(practiceBadgeText)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.black)
+                .multilineTextAlignment(.center)
+            if game.practiceConventions.count > 1 {
+                Text("\(game.practiceConventions.count) in rotation")
+                    .font(.system(size: 9))
+                    .foregroundColor(.black.opacity(0.6))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
+        .background(Color.yellow)
+        .cornerRadius(6)
     }
 
     private func contractButton(_ c: Contract) -> some View {
@@ -285,28 +327,29 @@ struct GameTableView: View {
         return false
     }
 
-    private var northArea: some View {
+    private var northLabel: String {
+        let prefix = isBidding(.north) ? "▶ " : ""
+        if game.dummy == .north { return prefix + "North (Dummy)" }
+        if isNorthWideDeclarer || isNorthFaceUpDeclarer { return prefix + "North — Declarer" }
+        return prefix + "North"
+    }
+
+    private func northArea(geo: GeometryProxy) -> some View {
         let northCards: [Card] = game.hands[.north] ?? []
-        let isDummy: Bool = game.dummy == .north
         let northTappable: Bool = game.tappableSeat == .north
         let legal: Set<Card> = northTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = northTappable
             ? { (c: Card) in game.playCard(c, from: .north) }
             : nil
-        let label: String = {
-            let prefix = isBidding(.north) ? "▶ " : ""
-            if isDummy                                    { return prefix + "North (Dummy)"    }
-            if isNorthWideDeclarer || isNorthFaceUpDeclarer { return prefix + "North — Declarer" }
-            return prefix + "North"
-        }()
+        let fanH = fanHeight(northRatio, geo: geo, chrome: 34)
 
         return VStack(spacing: 4) {
-            Text(label)
+            Text(northLabel)
                 .font(.callout.bold())
                 .foregroundColor(seatColor(.north))
             if northIsWide {
                 HandView(cards: northCards, faceDown: false, isSmall: false, isWide: true,
-                         trumpSuit: trump, legalCards: legal, onTap: tap)
+                         wideHeight: fanH, trumpSuit: trump, legalCards: legal, onTap: tap)
             } else {
                 HandView(cards: northCards, faceDown: !isNorthFaceUp(),
                          isSmall: true, trumpSuit: trump, legalCards: legal, onTap: tap)
@@ -316,9 +359,37 @@ struct GameTableView: View {
         .padding(.top, 8)
     }
 
-    // MARK: - West hand
+    // MARK: - Side hands
 
-    private var westArea: some View {
+    /// Face-down side hand, rotated to sit vertically. rotationEffect does not
+    /// change the layout frame, so the frame is set explicitly on both sides of
+    /// the rotation — otherwise the pre-rotation width bleeds into neighbours.
+    private func rotatedSideHand(_ seat: Seat, degrees: Double, isFaceUp: Bool,
+                                 legal: Set<Card>, tap: ((Card) -> Void)?,
+                                 maxLength: CGFloat) -> some View {
+        let cards = game.hands[seat] ?? []
+        let n = min(max(cards.count, 1), 13)
+        let length = max(60, min(maxLength, 34 + CGFloat(n - 1) * 22))
+        return HandView(cards: cards, faceDown: !isFaceUp, isSmall: true,
+                        faceDownLength: length, trumpSuit: trump,
+                        legalCards: legal, onTap: tap)
+            .frame(width: length, height: 50)
+            .rotationEffect(.degrees(degrees))
+            .frame(width: 50, height: length)
+    }
+
+    private func sideLabel(_ seat: Seat, name: String, isDummy: Bool) -> some View {
+        Text((isBidding(seat) ? "▶ " : "") + (isDummy ? "\(name)\n(Dummy)" : name))
+            .font(.callout.bold())
+            .foregroundColor(seatColor(seat))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
+            .cornerRadius(4)
+            .padding(.top, 4)
+    }
+
+    private func westArea(geo: GeometryProxy) -> some View {
         let isDummy  = game.dummy == .west
         let isFaceUp = isDummy && dummyRevealed
         let westTappable: Bool = game.tappableSeat == .west
@@ -326,6 +397,8 @@ struct GameTableView: View {
         let tap: ((Card) -> Void)? = westTappable
             ? { (c: Card) in game.playCard(c, from: .west) }
             : nil
+        let box = dummySize(.west, geo: geo)
+        let rotLength = geo.size.height * midRatio - 20
 
         return Group {
             if isFaceUp && ewDummyRevealed {
@@ -333,35 +406,22 @@ struct GameTableView: View {
                     Text((isBidding(.west) ? "▶ " : "") + "West (Dummy)")
                         .font(.callout.bold())
                         .foregroundColor(seatColor(.west))
-                    HandView(cards: game.hands[.west] ?? [], faceDown: false,
-                             isSmall: false, isMedium: true,
-                             trumpSuit: trump, legalCards: legal, onTap: tap)
+                    SideDummyView(cards: game.hands[.west] ?? [], size: box,
+                                  trumpSuit: trump, legalCards: legal, onTap: tap)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
             } else {
                 ZStack(alignment: .top) {
-                    HandView(cards: game.hands[.west] ?? [], faceDown: !isFaceUp, isSmall: true,
-                             trumpSuit: trump, legalCards: legal, onTap: tap)
-                        .frame(width: 280, height: 50)
-                        .rotationEffect(.degrees(90))
-                        .frame(width: 50, height: 280)
-                    Text((isBidding(.west) ? "▶ " : "") + (isDummy ? "West\n(Dummy)" : "West"))
-                        .font(.callout.bold())
-                        .foregroundColor(seatColor(.west))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
-                        .cornerRadius(4)
-                        .padding(.top, 4)
+                    rotatedSideHand(.west, degrees: 90, isFaceUp: isFaceUp,
+                                    legal: legal, tap: tap, maxLength: rotLength)
+                    sideLabel(.west, name: "West", isDummy: isDummy)
                 }
             }
         }
     }
 
-    // MARK: - East hand
-
-    private var eastArea: some View {
+    private func eastArea(geo: GeometryProxy) -> some View {
         let isDummy  = game.dummy == .east
         let isFaceUp = isDummy && dummyRevealed
         let eastTappable: Bool = game.tappableSeat == .east
@@ -369,6 +429,8 @@ struct GameTableView: View {
         let tap: ((Card) -> Void)? = eastTappable
             ? { (c: Card) in game.playCard(c, from: .east) }
             : nil
+        let box = dummySize(.east, geo: geo)
+        let rotLength = geo.size.height * midRatio - 20
 
         return Group {
             if isFaceUp && ewDummyRevealed {
@@ -376,27 +438,16 @@ struct GameTableView: View {
                     Text((isBidding(.east) ? "▶ " : "") + "East (Dummy)")
                         .font(.callout.bold())
                         .foregroundColor(seatColor(.east))
-                    HandView(cards: game.hands[.east] ?? [], faceDown: false,
-                             isSmall: false, isMedium: true,
-                             trumpSuit: trump, legalCards: legal, onTap: tap)
+                    SideDummyView(cards: game.hands[.east] ?? [], size: box,
+                                  trumpSuit: trump, legalCards: legal, onTap: tap)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
             } else {
                 ZStack(alignment: .top) {
-                    HandView(cards: game.hands[.east] ?? [], faceDown: !isFaceUp, isSmall: true,
-                             trumpSuit: trump, legalCards: legal, onTap: tap)
-                        .frame(width: 280, height: 50)
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 50, height: 280)
-                    Text((isBidding(.east) ? "▶ " : "") + (isDummy ? "East\n(Dummy)" : "East"))
-                        .font(.callout.bold())
-                        .foregroundColor(seatColor(.east))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(red: 0.08, green: 0.40, blue: 0.15).opacity(0.9))
-                        .cornerRadius(4)
-                        .padding(.top, 4)
+                    rotatedSideHand(.east, degrees: -90, isFaceUp: isFaceUp,
+                                    legal: legal, tap: tap, maxLength: rotLength)
+                    sideLabel(.east, name: "East", isDummy: isDummy)
                 }
             }
         }
@@ -404,14 +455,14 @@ struct GameTableView: View {
 
     // MARK: - Center
 
-    private var centerArea: some View {
+    private func centerArea(geo: GeometryProxy) -> some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                centerContent
+                centerContent(geo: geo)
                 if !game.auction.isEmpty && !isBiddingPhase && showAuction {
                     AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
                                 alternateColors: game.conventionSettings.useAlternateColors)
-                        .frame(maxWidth: 175, maxHeight: .infinity)
+                        .frame(maxWidth: 175)
                 }
             }
 
@@ -420,6 +471,7 @@ struct GameTableView: View {
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.70))
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
         }
         .padding(.horizontal, 6)
@@ -427,50 +479,62 @@ struct GameTableView: View {
     }
 
     @ViewBuilder
-    private var centerContent: some View {
+    private func centerContent(geo: GeometryProxy) -> some View {
         if game.phase == .bidding {
-            VStack(spacing: 10) {
-                // Thinking indicator — only when AI is active
-                if game.aiThinking {
-                    HStack(spacing: 6) {
-                        ProgressView().tint(.white).scaleEffect(0.7)
-                        Text("\(game.currentBidder.name) is thinking…")
-                            .font(.caption.bold())
-                            .foregroundColor(.white.opacity(0.75))
-                    }
-                } else if !game.isHumanTurn {
-                    Text("\(game.currentBidder.name)'s turn")
+            biddingCenter
+        } else if game.phase == .playing {
+            playingCenter(geo: geo)
+        }
+    }
+
+    private func playingCenter(geo: GeometryProxy) -> some View {
+        // When the auction panel is open it takes width away from the trick area.
+        let base = trickSize(geo: geo)
+        let w = showAuction && !game.auction.isEmpty ? base.width - 181 : base.width
+        return VStack(spacing: 4) {
+            TrickAreaView(trick: game.currentTrick, contract: game.contract,
+                          available: CGSize(width: max(140, w), height: base.height))
+            if game.aiThinking {
+                HStack(spacing: 4) {
+                    ProgressView().tint(.white).scaleEffect(0.7)
+                    Text("Thinking…")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.70))
+                }
+            }
+        }
+    }
+
+    private var biddingCenter: some View {
+        VStack(spacing: 10) {
+            // Thinking indicator — only when AI is active
+            if game.aiThinking {
+                HStack(spacing: 6) {
+                    ProgressView().tint(.white).scaleEffect(0.7)
+                    Text("\(game.currentBidder.name) is thinking…")
                         .font(.caption.bold())
                         .foregroundColor(.white.opacity(0.75))
                 }
-
-                // Auction + bidding box side by side — auction takes natural height
-                HStack(alignment: .top, spacing: 8) {
-                    if !game.auction.isEmpty {
-                        AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
-                                    alternateColors: game.conventionSettings.useAlternateColors)
-                            .frame(minWidth: 160, maxWidth: 200)
-                    }
-                    if game.isHumanTurn {
-                        BiddingBoxView()
-                    }
-                }
-
-                // Info area — one clearly styled block per item, in priority order
-                biddingInfoArea
+            } else if !game.isHumanTurn {
+                Text("\(game.currentBidder.name)'s turn")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.75))
             }
-        } else if game.phase == .playing {
-            VStack(spacing: 4) {
-                TrickAreaView(trick: game.currentTrick, contract: game.contract)
-                if game.aiThinking {
-                    HStack(spacing: 4) {
-                        ProgressView().tint(.white).scaleEffect(0.7)
-                        Text("Thinking…")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.70))
-                    }
+
+            // Auction + bidding box side by side — auction takes natural height
+            HStack(alignment: .top, spacing: 8) {
+                if !game.auction.isEmpty {
+                    AuctionView(auction: game.auction, dealer: game.dealer, contract: game.contract,
+                                alternateColors: game.conventionSettings.useAlternateColors)
+                        .frame(minWidth: 160, maxWidth: 200)
+                }
+                if game.isHumanTurn {
+                    BiddingBoxView()
                 }
             }
+
+            // Info area — one clearly styled block per item, in priority order
+            biddingInfoArea
         }
     }
 
@@ -531,22 +595,21 @@ struct GameTableView: View {
 
     // MARK: - South hand
 
-    private var southArea: some View {
+    private var southLabel: String {
+        let prefix = isBidding(.south) ? "▶ " : ""
+        if game.contract?.declarer == .south { return prefix + "South — Declarer (You)" }
+        if game.dummy == .south              { return prefix + "South (Dummy)" }
+        return prefix + "South (You)"
+    }
+
+    private func southArea(geo: GeometryProxy) -> some View {
         let southCards: [Card] = game.hands[.south] ?? []
-        let isDeclarer: Bool = game.contract?.declarer == .south
-        let isDummy: Bool = game.dummy == .south
         let southTappable: Bool = game.tappableSeat == .south
         let legal: Set<Card> = southTappable ? game.legalCards : []
         let tap: ((Card) -> Void)? = southTappable
             ? { (c: Card) in game.playCard(c, from: .south) }
             : nil
-
-        let southLabel: String = {
-            let prefix = isBidding(.south) ? "▶ " : ""
-            if isDeclarer { return prefix + "South — Declarer (You)" }
-            if isDummy    { return prefix + "South (Dummy)" }
-            return prefix + "South (You)"
-        }()
+        let fanH = fanHeight(southRatio, geo: geo, chrome: 36)
 
         return VStack(spacing: 6) {
             Text(southLabel)
@@ -554,8 +617,7 @@ struct GameTableView: View {
                 .foregroundColor(seatColor(.south))
 
             HandView(cards: southCards, faceDown: false, isSmall: false, isWide: true,
-                     trumpSuit: trump, legalCards: legal,
-                     onTap: southTappable ? tap : nil)
+                     wideHeight: fanH, trumpSuit: trump, legalCards: legal, onTap: tap)
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 8)

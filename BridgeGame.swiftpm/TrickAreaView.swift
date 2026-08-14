@@ -4,12 +4,21 @@ import SwiftUI
 struct TrickAreaView: View {
     let trick: Trick?
     let contract: Contract?
-    var compact: Bool = false
+    /// Space the centre column can actually spare. Card size is derived from it
+    /// so the trick never overflows and gets clipped by the table layout.
+    var available: CGSize = CGSize(width: 300, height: 530)
 
-    private var frameW: CGFloat { compact ? 220 : 280 }
-    private var frameH: CGFloat { compact ? 300 : 530 }
-    private var slotW:  CGFloat { compact ?  60 :  80 }
-    private var slotH:  CGFloat { compact ?  90 : 170 }
+    private let gap: CGFloat = 6
+
+    // Three card rows stack vertically; the middle row holds two cards side by side.
+    private var slotH: CGFloat {
+        let byHeight = (available.height - gap * 4) / 3
+        let byWidth  = ((available.width - gap * 4) / 2) / CardView.aspect
+        return max(52, min(170, min(byHeight, byWidth)))
+    }
+    private var slotW:  CGFloat { slotH * CardView.aspect }
+    private var frameW: CGFloat { slotW * 2 + gap * 4 }
+    private var frameH: CGFloat { slotH * 3 + gap * 4 }
 
     var body: some View {
         ZStack {
@@ -21,9 +30,9 @@ struct TrickAreaView: View {
                 )
 
             if let trick = trick {
-                VStack(spacing: 2) {
+                VStack(spacing: gap * 0.4) {
                     trickCard(for: .north, in: trick)
-                    HStack(spacing: compact ? 12 : 20) {
+                    HStack(spacing: gap * 2) {
                         trickCard(for: .west, in: trick)
                         trickCard(for: .east, in: trick)
                     }
@@ -41,9 +50,9 @@ struct TrickAreaView: View {
     @ViewBuilder
     private func trickCard(for seat: Seat, in trick: Trick) -> some View {
         if let card = trick.card(for: seat) {
-            CardView(card: card, isCompact: compact)
+            CardView(card: card, explicitHeight: slotH)
         } else {
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: max(3, slotH * 0.05))
                 .stroke(Color.gray.opacity(0.2), lineWidth: 1)
                 .frame(width: slotW, height: slotH)
         }

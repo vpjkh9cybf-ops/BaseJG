@@ -47,6 +47,9 @@ class GameState: ObservableObject {
     @Published var claimDenied: Bool = false
     @Published var scoringMode: ScoringMode = .rubber
     @Published var biddingNote: String = ""
+    /// Every convention the user selected to drill. Empty = ordinary play.
+    @Published var practiceConventions: Set<PracticeConvention> = []
+    /// The convention the *current* deal was constructed for.
     @Published var practiceConvention: PracticeConvention? = nil
     @Published var showCorrectPractice: Bool = false
     @Published var showIncorrectPractice: Bool = false
@@ -62,10 +65,15 @@ class GameState: ObservableObject {
     private var pendingPracticeBid: Bid? = nil
 
     let humanSeat: Seat = .south
-    @Published var switchSeatsForDeclarer: Bool = false
-    @Published var rkcbFlavor: RKCBFlavor = .f1430
+    /// Defaults on: when the human would be dummy, they play the declarer's hand instead.
+    @Published var switchSeatsForDeclarer: Bool = true
     @Published var conventionSettings: ConventionSettings = ConventionSettings.load() {
         didSet { conventionSettings.save() }
+    }
+
+    /// Derived from the slam-ask setting so there is a single source of truth.
+    var rkcbFlavor: RKCBFlavor {
+        conventionSettings.slamAskStyle == .rkcb0314 ? .f0314 : .f1430
     }
     @Published var bidWarning: BidAnalysis? = nil
 
@@ -183,6 +191,7 @@ class GameState: ObservableObject {
     // MARK: - Public Actions
 
     func startNewRubber() {
+        practiceConventions = []
         practiceConvention = nil
         practiceHint = ""
         showCorrectPractice = false
@@ -194,6 +203,10 @@ class GameState: ObservableObject {
     }
 
     func startNewHand() {
+        // A random deal is not built around any convention, so no drill applies
+        // to it — clearing this stops a stale hint firing on an unrelated hand.
+        practiceConvention = nil
+
         let deck = Card.fullDeck
         hands[.north] = Array(deck[0..<13]).sorted(by: sortCards)
         hands[.east]  = Array(deck[13..<26]).sorted(by: sortCards)
@@ -317,35 +330,33 @@ class GameState: ObservableObject {
             phase = .rubberComplete
         } else {
             vulnerability = rubberScore.currentVulnerability
-            if practiceConvention != nil {
-                dealer = practiceConvention!.dealerSeat
-                dealForConvention()
-            } else {
+            if practiceConventions.isEmpty {
                 startNewHand()
+            } else {
+                dealForConvention()
             }
         }
     }
 
     func startNewRubberAfterCompletion() {
-        if let convention = practiceConvention {
-            startPractice(convention: convention)
-        } else {
+        if practiceConventions.isEmpty {
             startNewRubber()
+        } else {
+            startPractice(conventions: practiceConventions)
         }
     }
 
-    func startPractice(convention: PracticeConvention) {
-        practiceConvention = convention
+    func startPractice(conventions: Set<PracticeConvention>) {
+        guard !conventions.isEmpty else { startNewRubber(); return }
+        practiceConventions = conventions
         rubberScore.reset(mode: .rubber)
         vulnerability = .neither
-        dealer = convention.dealerSeat
         dealForConvention()
     }
 
     func nextPracticeHand() {
-        guard let convention = practiceConvention else { return }
+        guard !practiceConventions.isEmpty else { return }
         pendingPracticeBid = nil
-        dealer = convention.dealerSeat
         dealForConvention()
     }
 
@@ -380,33 +391,57 @@ class GameState: ObservableObject {
         triggerAIIfNeeded()
     }
 
+    /// Deal until the layout fits one of the selected conventions, then set the
+    /// dealer that produces the auction where that convention actually comes up.
+    /// Conventions are tried in a shuffled order so a multi-convention drill
+    /// does not always resolve to the same (easiest to satisfy) one.
     private func dealForConvention() {
-        guard let convention = practiceConvention else { startNewHand(); return }
-        for _ in 0..<40 {
-            let deck = Card.fullDeck
+        guard !practiceConventions.isEmpty else { startNewHand(); return }
+        let pool = practiceConventions.shuffled()
+
+        for _ in 0..<200 {
+            let deck  = Card.fullDeck
             let north = Array(deck[0..<13]).sorted(by: sortCards)
             let east  = Array(deck[13..<26]).sorted(by: sortCards)
             let south = Array(deck[26..<39]).sorted(by: sortCards)
             let west  = Array(deck[39..<52]).sorted(by: sortCards)
-            if convention.northQualifies(north) && convention.southQualifies(south, north: north) {
-                hands[.north] = north
-                hands[.east]  = east
-                hands[.south] = south
-                hands[.west]  = west
-                dealtHands = hands
-                dealerAtDeal = dealer
-                auction = []; completedTricks = []; currentTrick = nil
-                contract = nil; dummy = nil; nsTricks = 0; ewTricks = 0
-                aiThinking = false; biddingNote = ""; practiceHint = ""
-                bidWarning = nil; pendingPracticeBid = nil
-                showCorrectPractice = false; showIncorrectPractice = false
-                statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
-                phase = .bidding
-                triggerAIIfNeeded()
+
+            for convention in pool
+            where convention.northQualifies(north)
+               && convention.southQualifies(south, north: north)
+               && convention.opponentsQualify(east: east, west: west) {
+                practiceConvention = convention
+                dealer = convention.dealerSeat
+                applyPracticeDeal(north: north, east: east, south: south, west: west)
                 return
             }
         }
+
+        // Could not construct a qualifying layout — play a normal deal rather
+        // than looping forever, and clear the per-hand convention so no hint or
+        // grading fires on a hand that does not actually contain the auction.
+        practiceConvention = nil
         startNewHand()
+    }
+
+    private func applyPracticeDeal(north: [Card], east: [Card], south: [Card], west: [Card]) {
+        hands[.north] = north
+        hands[.east]  = east
+        hands[.south] = south
+        hands[.west]  = west
+        dealtHands   = hands
+        dealerAtDeal = dealer
+
+        auction = []; completedTricks = []; currentTrick = nil
+        contract = nil; dummy = nil; nsTricks = 0; ewTricks = 0
+        aiThinking = false; biddingNote = ""; practiceHint = ""
+        bidWarning = nil; pendingPracticeBid = nil
+        showCorrectPractice = false; showIncorrectPractice = false
+
+        statusMessage = "\(dealer.name) deals — \(vulnerability.rawValue) vulnerable"
+        phase = .bidding
+        updatePracticeHint()
+        triggerAIIfNeeded()
     }
 
     // MARK: - Private
@@ -470,7 +505,11 @@ class GameState: ObservableObject {
             dealer = dealer.next
             Task {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                self.startNewHand()
+                if self.practiceConventions.isEmpty {
+                    self.startNewHand()
+                } else {
+                    self.dealForConvention()   // stay in the drill
+                }
             }
             return
         }

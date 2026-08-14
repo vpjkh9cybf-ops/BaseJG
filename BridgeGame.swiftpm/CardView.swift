@@ -9,37 +9,37 @@ struct CardView: View {
     var isMedium: Bool = false
     var wideHand: Bool = false
     var isCompact: Bool = false   // Compact trick area (when E/W dummy shown in center)
+    /// Overrides every preset. Width and all fonts scale from it, so a caller
+    /// that knows how much room it has can hand the card an exact height.
+    var explicitHeight: CGFloat? = nil
 
-    private var width:   CGFloat {
-        if isSmall   { return 34 }
-        if isMedium  { return 60 }
-        if isCompact { return 60 }
-        if wideHand  { return 86 }
-        return 80
-    }
-    private var height:  CGFloat {
+    /// Playing-card proportion (width / height) — held constant at every size.
+    static let aspect: CGFloat = 0.47
+
+    private var height: CGFloat {
+        if let h = explicitHeight { return h }
         if isSmall   { return 50 }
         if isMedium  { return 84 }
         if isCompact { return 90 }
         if wideHand  { return 180 }
         return 170
     }
-    private var radius:  CGFloat { isSmall ? 4 : (isMedium ? 7 : 8) }
 
-    private var rankFont: Font {
-        if isSmall   { return .system(size: 10, weight: .bold) }
-        if isMedium  { return .system(size: 18, weight: .bold) }
-        if isCompact { return .system(size: 28, weight: .bold) }
-        if wideHand  { return .system(size: 60, weight: .bold) }
-        return .system(size: 50, weight: .bold)
+    private var width: CGFloat {
+        if explicitHeight != nil { return height * CardView.aspect }
+        if isSmall   { return 34 }
+        if isMedium  { return 60 }
+        if isCompact { return 60 }
+        if wideHand  { return 86 }
+        return 80
     }
-    private var centerSuitFont: Font {
-        if isSmall   { return .body }
-        if isMedium  { return .title2 }
-        if isCompact { return .system(size: 28) }
-        if wideHand  { return .system(size: 60) }
-        return .system(size: 50)
-    }
+
+    private var radius: CGFloat { max(3, height * 0.05) }
+
+    // The rank is what the player actually reads, so it gets as much of the
+    // card as the proportions allow at every size.
+    private var rankFont:       Font { .system(size: max(9, height * 0.34), weight: .bold) }
+    private var centerSuitFont: Font { .system(size: max(9, height * 0.32)) }
 
     var body: some View {
         ZStack {
@@ -56,16 +56,20 @@ struct CardView: View {
                 // Rank only at top, centered
                 Text(card.rank.display)
                     .font(rankFont)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
                     .foregroundColor(card.suit.color(alternate: game.conventionSettings.useAlternateColors))
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, isSmall ? 2 : isMedium ? 4 : 6)
-                    .padding(.horizontal, isSmall ? 2 : 4)
+                    .padding(.top, max(1, height * 0.035))
+                    .padding(.horizontal, max(1, width * 0.05))
 
                 Spacer(minLength: 0)
 
                 // Suit symbol centered
                 Text(card.suit.symbol)
                     .font(centerSuitFont)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
                     .foregroundColor(card.suit.color(alternate: game.conventionSettings.useAlternateColors))
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -78,12 +82,17 @@ struct CardView: View {
 
 struct FaceDownCardView: View {
     var isSmall: Bool = false
+    var explicitHeight: CGFloat? = nil
 
-    private var width:  CGFloat { isSmall ? 34 : 66 }
-    private var height: CGFloat { isSmall ? 50 : 170 }
+    private var height: CGFloat { explicitHeight ?? (isSmall ? 50 : 170) }
+    private var width:  CGFloat {
+        if explicitHeight != nil { return height * CardView.aspect }
+        return isSmall ? 34 : 66
+    }
+    private var radius: CGFloat { max(3, height * 0.05) }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: isSmall ? 4 : 8)
+        RoundedRectangle(cornerRadius: radius)
             .fill(
                 LinearGradient(
                     colors: [Color.blue.opacity(0.8), Color.indigo.opacity(0.9)],
@@ -91,9 +100,9 @@ struct FaceDownCardView: View {
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: isSmall ? 3 : 7)
+                RoundedRectangle(cornerRadius: max(2, radius - 1))
                     .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                    .padding(isSmall ? 3 : 5)
+                    .padding(max(2, height * 0.06))
             )
             .shadow(color: .black.opacity(0.2), radius: 2, x: 1, y: 1)
             .frame(width: width, height: height)

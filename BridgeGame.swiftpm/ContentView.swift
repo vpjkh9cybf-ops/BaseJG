@@ -91,27 +91,39 @@ struct MenuView: View {
     }
 }
 
+/// Multi-select drill picker. Every deal is then constructed so that one of the
+/// chosen conventions actually comes up in the auction.
 struct ConventionPickerView: View {
     @EnvironmentObject var game: GameState
     @Environment(\.dismiss) var dismiss
+    @State private var selected: Set<PracticeConvention> = []
+
+    private var countLabel: String {
+        selected.count == 1 ? "1 convention selected"
+                            : "\(selected.count) conventions selected"
+    }
+
+    private var allSelected: Bool {
+        selected.count == PracticeConvention.allCases.count
+    }
 
     var body: some View {
         NavigationView {
-            List(PracticeConvention.allCases) { convention in
-                Button {
-                    dismiss()
-                    game.startPractice(convention: convention)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(convention.rawValue)
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        Text(convention.subtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+            List {
+                Section {
+                    Button(allSelected ? "Clear All" : "Select All") { toggleAll() }
+                } footer: {
+                    Text(selected.isEmpty
+                         ? "Select at least one convention to begin."
+                         : countLabel)
+                }
+
+                Section {
+                    ForEach(PracticeConvention.allCases) { convention in
+                        conventionRow(convention)
                     }
-                    .padding(.vertical, 4)
+                } header: {
+                    Text("Every deal is built so one of your selections comes up in the auction")
                 }
             }
             .navigationTitle("Convention Practice")
@@ -120,8 +132,54 @@ struct ConventionPickerView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Start") {
+                        let chosen = selected
+                        dismiss()
+                        game.startPractice(conventions: chosen)
+                    }
+                    .disabled(selected.isEmpty)
+                }
             }
         }
+        .navigationViewStyle(.stack)
+        .onAppear {
+            if selected.isEmpty { selected = game.practiceConventions }
+        }
+    }
+
+    private func conventionRow(_ convention: PracticeConvention) -> some View {
+        Button {
+            toggle(convention)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: selected.contains(convention)
+                      ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundColor(selected.contains(convention) ? .blue : .secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(convention.rawValue)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text(convention.subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggle(_ convention: PracticeConvention) {
+        if selected.contains(convention) { selected.remove(convention) }
+        else { selected.insert(convention) }
+    }
+
+    private func toggleAll() {
+        selected = allSelected ? [] : Set(PracticeConvention.allCases)
     }
 }
 
