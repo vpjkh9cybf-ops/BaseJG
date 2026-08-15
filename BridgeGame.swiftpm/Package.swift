@@ -1,5 +1,5 @@
 // swift-tools-version: 5.5
-// BRIDGE APP — Built 2026-06-07
+// Conventional Wisdom — modified 2026-08-14 21:29 UTC
 import PackageDescription
 import AppleProductTypes
 

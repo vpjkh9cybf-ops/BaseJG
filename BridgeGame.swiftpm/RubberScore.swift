@@ -1,4 +1,4 @@
-// BRIDGE APP — Built 2026-06-07
+// Conventional Wisdom — modified 2026-06-12 13:13 UTC
 import SwiftUI
 
 struct HandResult {

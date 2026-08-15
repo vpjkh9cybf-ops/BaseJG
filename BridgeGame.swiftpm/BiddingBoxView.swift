@@ -1,4 +1,4 @@
-// BRIDGE APP — Built 2026-06-07
+// Conventional Wisdom — modified 2026-06-27 19:57 UTC
 import SwiftUI
 
 struct BiddingBoxView: View {
