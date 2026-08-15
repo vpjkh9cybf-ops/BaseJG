@@ -22,6 +22,7 @@ struct MenuView: View {
     @State private var showSettings = false
 
     private let felt = Color(red: 0.08, green: 0.40, blue: 0.15)
+    private let cardRed = Color(red: 1.0, green: 0.35, blue: 0.35)
 
     var body: some View {
         ZStack {
@@ -78,19 +79,28 @@ struct MenuView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                Text("♠").foregroundColor(.white)
-                Text("♥").foregroundColor(Color(red: 1.0, green: 0.35, blue: 0.35))
-                Text("Bridge").foregroundColor(.white)
-                Text("♦").foregroundColor(Color(red: 1.0, green: 0.35, blue: 0.35))
-                Text("♣").foregroundColor(.white)
+        VStack(spacing: 8) {
+            HStack(spacing: 16) {
+                HStack(spacing: 6) {
+                    Text("♠").foregroundColor(.white)
+                    Text("♥").foregroundColor(cardRed)
+                }
+                .font(.system(size: 40, weight: .bold, design: .serif))
+
+                Text("Conventional Wisdom")
+                    .font(.system(size: 50, weight: .bold, design: .serif))
+                    .foregroundColor(.white)
+
+                HStack(spacing: 6) {
+                    Text("♦").foregroundColor(cardRed)
+                    Text("♣").foregroundColor(.white)
+                }
+                .font(.system(size: 40, weight: .bold, design: .serif))
             }
-            .font(.system(size: 56, weight: .bold, design: .serif))
-            .minimumScaleFactor(0.6)
+            .minimumScaleFactor(0.5)
             .lineLimit(1)
 
-            Text("Rubber & Chicago · Standard American · SAYC · RKCB")
+            Text("Contract Bridge · Rubber & Chicago · Standard American · SAYC")
                 .font(.title3)
                 .foregroundColor(.white.opacity(0.7))
         }
