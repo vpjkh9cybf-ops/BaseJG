@@ -19,75 +19,124 @@ struct ContentView: View {
 struct MenuView: View {
     @EnvironmentObject var game: GameState
     @State private var showConventionPicker = false
+    @State private var showSettings = false
 
-    private var startTitle: String {
-        game.scoringMode == .chicago ? "New Chicago" : "New Rubber"
-    }
+    private let felt = Color(red: 0.08, green: 0.40, blue: 0.15)
 
     var body: some View {
         ZStack {
-            Color(red: 0.08, green: 0.40, blue: 0.15)
-                .ignoresSafeArea()
+            felt.ignoresSafeArea()
 
-            VStack(spacing: 28) {
-                VStack(spacing: 8) {
-                    Text("♠ ♥ Bridge ♦ ♣")
-                        .font(.system(size: 42, weight: .bold, design: .serif))
-                        .foregroundColor(.white)
-
-                    Text("Standard American · SAYC · RKCB")
-                        .font(.callout)
-                        .foregroundColor(.white.opacity(0.7))
-                }
-
-                // Scoring mode picker
-                VStack(spacing: 8) {
-                    Text("Scoring")
-                        .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.6))
-                    Picker("Scoring Mode", selection: $game.scoringMode) {
-                        ForEach(ScoringMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
+            VStack(spacing: 0) {
+                header
+                Spacer(minLength: 20)
+                // Four choices across the width — landscape has the room, and
+                // each card carries its own explanation instead of leaving
+                // captions floating beside a picker.
+                HStack(alignment: .top, spacing: 18) {
+                    MenuCard(icon: "suit.spade.fill",
+                             tint: .white,
+                             title: "New Rubber",
+                             subtitle: "Two games to win. Points carry over above and below the line.") {
+                        game.scoringMode = .rubber
+                        game.startNewRubber()
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                    Text(game.scoringMode == .chicago
-                         ? "4 deals · fixed vulnerability · game bonus per hand"
-                         : "2 games to win · points accumulate across hands")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .frame(width: 240)
-                }
 
-                MenuButton(title: startTitle, icon: "suit.spade.fill") {
-                    game.startNewRubber()
-                }
+                    MenuCard(icon: "square.grid.2x2.fill",
+                             tint: Color(red: 1.0, green: 0.72, blue: 0.3),
+                             title: "New Chicago",
+                             subtitle: "Four deals, fixed vulnerability, game bonus paid every hand.") {
+                        game.scoringMode = .chicago
+                        game.startNewRubber()
+                    }
 
-                MenuButton(title: "Convention Practice", icon: "graduationcap.fill") {
-                    showConventionPicker = true
-                }
+                    MenuCard(icon: "graduationcap.fill",
+                             tint: Color(red: 0.45, green: 0.8, blue: 1.0),
+                             title: "Convention Practice",
+                             subtitle: "Drill Stayman, transfers, Jacoby 2NT, weak twos, 2/1 and more on hands built for them.") {
+                        showConventionPicker = true
+                    }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Conventions included:")
-                        .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.6))
-                    ForEach([
-                        "Stayman", "Jacoby Transfers",
-                        "Jacoby 2NT", "RKCB (1430 / 0314)",
-                        "Weak 2 openings", "Negative Doubles",
-                        "2/1 Game Force", "Splinters", "Drury"
-                    ], id: \.self) { conv in
-                        Text("• \(conv)")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.55))
+                    MenuCard(icon: "slider.horizontal.3",
+                             tint: Color(red: 0.72, green: 0.9, blue: 0.6),
+                             title: "Convention Card",
+                             subtitle: "Choose your variations — the AI bids whatever you set here.") {
+                        showSettings = true
                     }
                 }
+                .padding(.horizontal, 32)
+                Spacer(minLength: 20)
             }
-            .padding(40)
+            .padding(.vertical, 28)
         }
-        .sheet(isPresented: $showConventionPicker) { ConventionPickerView().environmentObject(game) }
+        .sheet(isPresented: $showConventionPicker) {
+            ConventionPickerView().environmentObject(game)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView().environmentObject(game)
+        }
+    }
+
+    private var header: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Text("♠").foregroundColor(.white)
+                Text("♥").foregroundColor(Color(red: 1.0, green: 0.35, blue: 0.35))
+                Text("Bridge").foregroundColor(.white)
+                Text("♦").foregroundColor(Color(red: 1.0, green: 0.35, blue: 0.35))
+                Text("♣").foregroundColor(.white)
+            }
+            .font(.system(size: 56, weight: .bold, design: .serif))
+            .minimumScaleFactor(0.6)
+            .lineLimit(1)
+
+            Text("Rubber & Chicago · Standard American · SAYC · RKCB")
+                .font(.title3)
+                .foregroundColor(.white.opacity(0.7))
+        }
+    }
+}
+
+/// A large tappable card. The whole thing is the button, and the explanation
+/// lives on it rather than as loose text nearby.
+struct MenuCard: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 38, weight: .semibold))
+                    .foregroundColor(tint)
+
+                Text(title)
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundColor(.white.opacity(0.78))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, minHeight: 240, alignment: .topLeading)
+            .background(Color.white.opacity(0.10))
+            .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(tint.opacity(0.5), lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
     }
 }
 
@@ -183,29 +232,3 @@ struct ConventionPickerView: View {
     }
 }
 
-struct MenuButton: View {
-    let title: String
-    let icon: String
-    var disabled: Bool = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.title3)
-                Text(title)
-                    .font(.title3.bold())
-            }
-            .foregroundColor(disabled ? .white.opacity(0.4) : .white)
-            .frame(width: 220, height: 52)
-            .background(disabled ? Color.white.opacity(0.1) : Color.blue.opacity(0.85))
-            .cornerRadius(14)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .disabled(disabled)
-    }
-}

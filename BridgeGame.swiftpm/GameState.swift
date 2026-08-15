@@ -56,6 +56,12 @@ class GameState: ObservableObject {
     @Published var practiceFeedbackMessage: String = ""
     @Published var practiceHint: String = ""
 
+    /// Bumped whenever the board changes underneath a pending timer. Each
+    /// delayed Task captures the value at spawn and abandons its work if it has
+    /// moved on — otherwise an AI bid or card lands seconds after the user has
+    /// already left for the menu or restarted the hand.
+    private var boardGeneration: Int = 0
+
     // Replay snapshots
     private var dealtHands: [Seat: [Card]] = [:]
     private var dealerAtDeal: Seat = .north
@@ -199,7 +205,35 @@ class GameState: ObservableObject {
         startNewHand()
     }
 
+    /// Abandon the current game and go back to the start screen.
+    func returnToMenu() {
+        boardGeneration += 1
+
+        phase                 = .menu
+        hands                 = [:]
+        auction               = []
+        completedTricks       = []
+        currentTrick          = nil
+        contract              = nil
+        dummy                 = nil
+        nsTricks              = 0
+        ewTricks              = 0
+        aiThinking            = false
+        statusMessage         = ""
+        biddingNote           = ""
+        practiceHint          = ""
+        bidWarning            = nil
+        pendingPracticeBid    = nil
+        practiceConvention    = nil
+        practiceConventions   = []
+        claimDenied           = false
+        showCorrectPractice   = false
+        showIncorrectPractice = false
+    }
+
     func startNewHand() {
+        boardGeneration += 1
+
         // A random deal is not built around any convention, so no drill applies
         // to it — clearing this stops a stale hint firing on an unrelated hand.
         practiceConvention = nil
@@ -359,6 +393,7 @@ class GameState: ObservableObject {
 
     func replayFromBidding() {
         guard !dealtHands.isEmpty else { return }
+        boardGeneration += 1
         hands   = dealtHands
         dealer  = dealerAtDeal
         auction = []; completedTricks = []; currentTrick = nil
@@ -373,6 +408,7 @@ class GameState: ObservableObject {
 
     func replayFromPlay() {
         guard let c = contractSnapshot, !dealtHands.isEmpty else { return }
+        boardGeneration += 1
         hands            = dealtHands
         auction          = auctionSnapshot
         contract         = c
@@ -422,6 +458,7 @@ class GameState: ObservableObject {
     }
 
     private func applyPracticeDeal(north: [Card], east: [Card], south: [Card], west: [Card]) {
+        boardGeneration += 1
         hands[.north] = north
         hands[.east]  = east
         hands[.south] = south
@@ -466,9 +503,11 @@ class GameState: ObservableObject {
         let vul      = vulnerability
         // The engine bids the partnership's actual convention card.
         let ai       = BiddingAI(settings: conventionSettings)
+        let gen      = boardGeneration
 
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard self.boardGeneration == gen else { return }
             let bid = ai.selectBid(hand: hand, seat: bidder,
                                    auction: snapshot, vulnerability: vul)
             self.aiThinking = false
@@ -500,8 +539,10 @@ class GameState: ObservableObject {
         if auction.allSatisfy({ $0.bid == .pass }) {
             statusMessage = "Passed out — no hand played"
             dealer = dealer.next
+            let gen = boardGeneration
             Task {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard self.boardGeneration == gen else { return }
                 if self.practiceConventions.isEmpty {
                     self.startNewHand()
                 } else {
@@ -545,8 +586,10 @@ class GameState: ObservableObject {
 
         if currentTrick?.isComplete == true {
             let trick = currentTrick!
+            let gen = boardGeneration
             Task {
                 try? await Task.sleep(nanoseconds: 600_000_000)
+                guard self.boardGeneration == gen else { return }
                 self.processTrickEnd(trick)
             }
         } else {
@@ -594,9 +637,11 @@ class GameState: ObservableObject {
         let trickCopy     = trick
         let completedCopy = completedTricks
         let cCopy         = c
+        let gen           = boardGeneration
 
         Task {
             try? await Task.sleep(nanoseconds: 600_000_000)
+            guard self.boardGeneration == gen else { return }
             let card = PlayAI.selectCard(hand: hand, trick: trickCopy, contract: cCopy,
                                          seat: playingSeat, isDeclarer: isDec, isDummy: isDum,
                                          completedTricks: completedCopy)

@@ -5,6 +5,7 @@ struct GameTableView: View {
     @EnvironmentObject var game: GameState
     @State private var showAuction: Bool = false
     @State private var showSettings: Bool = false
+    @State private var confirmExit: Bool = false
 
     private let scoreColumnW: CGFloat = 145
 
@@ -135,6 +136,12 @@ struct GameTableView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        .alert("Leave this game?", isPresented: $confirmExit) {
+            Button("Leave", role: .destructive) { game.returnToMenu() }
+            Button("Keep Playing", role: .cancel) {}
+        } message: {
+            Text("The hand in progress and the current score will be discarded.")
+        }
         .alert("Claim Denied", isPresented: $game.claimDenied) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -202,9 +209,31 @@ struct GameTableView: View {
             }
 
             Spacer(minLength: 0)
+
+            // Pinned to the bottom of the column, clear of every hand
+            exitButton
         }
         .padding(.horizontal, 4)
         .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+
+    private var exitButton: some View {
+        Button { confirmExit = true } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "house.fill")
+                Text("Main Menu").font(.caption.bold())
+            }
+            .foregroundColor(.white.opacity(0.85))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.30))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+            )
+        }
     }
 
     private var practiceBadge: some View {
