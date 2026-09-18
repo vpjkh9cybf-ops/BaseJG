@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-08-15 01:52 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 enum RKCBFlavor: String, CaseIterable {
@@ -336,12 +336,27 @@ class GameState: ObservableObject {
         let opponentSeats: [Seat] = Seat.allCases.filter { !declarerSeats.contains($0) }
         let ourCards   = declarerSeats.compactMap { hands[$0] }.flatMap { $0 }
         let theirCards = opponentSeats.compactMap { hands[$0] }.flatMap { $0 }
+        let trump = c.strain.suit
+
         var winners = 0
         for suit in Suit.allCases {
             let ours   = ourCards.filter   { $0.suit == suit }.sorted { $0.rank > $1.rank }
             let theirs = theirCards.filter { $0.suit == suit }.sorted { $0.rank > $1.rank }
-            if theirs.isEmpty { winners += ours.count }
-            else { winners += ours.filter { $0.rank > theirs[0].rank }.count }
+            let suitWinners = theirs.isEmpty ? ours.count : ours.filter { $0.rank > theirs[0].rank }.count
+            guard suitWinners > 0 else { continue }
+
+            // A defender void in a side suit can ruff even our top cards there,
+            // so a "winner" only counts once no defender can trump it.
+            if let trump = trump, suit != trump {
+                let defenderCanRuff = opponentSeats.contains { seat in
+                    let hand = hands[seat] ?? []
+                    let voidInSuit = !hand.contains { $0.suit == suit }
+                    let holdsTrump = hand.contains { $0.suit == trump }
+                    return voidInSuit && holdsTrump
+                }
+                guard !defenderCanRuff else { return false }
+            }
+            winners += suitWinners
         }
         return winners >= remaining
     }

@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-06-12 13:13 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 struct HandResult {
@@ -24,7 +24,9 @@ struct HandResult {
         }
     }
 
-    // Score that goes below the line (trick score only)
+    // Score that goes below the line (trick score, plus undoubled overtricks —
+    // those score at the normal trick rate and count toward game. Doubled and
+    // redoubled overtricks are a fixed bonus that goes above the line instead.)
     var belowLineScore: Int {
         guard made else { return 0 }
         let raw: Int
@@ -33,18 +35,22 @@ struct HandResult {
         case .hearts, .spades:  raw = 30 * contract.level.rawValue
         case .notrump:          raw = 40 + 30 * (contract.level.rawValue - 1)
         }
-        return raw * contract.doubled.rawValue
+        var score = raw * contract.doubled.rawValue
+        if contract.doubled == .undoubled && overtricks > 0 {
+            let perTrick = contract.strain.isMinor ? 20 : 30
+            score += perTrick * overtricks
+        }
+        return score
     }
 
     private func madeScore() -> Int {
         var score = belowLineScore
 
-        // Overtricks
+        // Doubled/redoubled overtricks are a fixed bonus above the line —
+        // undoubled ones are already folded into belowLineScore above.
         if overtricks > 0 {
             switch contract.doubled {
-            case .undoubled:
-                let perTrick = contract.strain.isMinor ? 20 : 30
-                score += perTrick * overtricks
+            case .undoubled: break
             case .doubled:
                 score += (isVulnerable ? 200 : 100) * overtricks
             case .redoubled:

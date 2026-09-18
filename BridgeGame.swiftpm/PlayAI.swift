@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-06-07 03:07 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 struct PlayAI {
@@ -16,7 +16,6 @@ struct PlayAI {
         guard !hand.isEmpty else { return hand.first ?? Card(suit: .spades, rank: .two) }
 
         let ledSuit = trick.ledSuit
-        let trump = contract.strain.suit
 
         // Must follow suit if possible
         let followers = ledSuit.map { s in hand.filter { $0.suit == s } } ?? []
@@ -46,8 +45,6 @@ struct PlayAI {
         isDeclarer: Bool,
         completedTricks: [Trick]
     ) -> Card {
-        let trump = contract.strain.suit
-
         if isDeclarer {
             return declarerLead(hand: hand, contract: contract, completedTricks: completedTricks)
         } else {
@@ -57,12 +54,18 @@ struct PlayAI {
 
     private static func declarerLead(hand: [Card], contract: Contract, completedTricks: [Trick]) -> Card {
         let trump = contract.strain.suit
-        let eval  = HandEvaluator.evaluate(hand)
 
-        // Draw trumps first (if any remain in hand)
-        if let t = trump, let trumpCard = hand.filter({ $0.suit == t }).max(by: { $0.rank < $1.rank }) {
-            // Lead high trump to draw opponents' trumps
-            return trumpCard
+        // Draw trumps while any could still be outstanding. Once every trump
+        // is accounted for between what we hold and what's already been
+        // played, there's nothing left to draw and this stops — otherwise
+        // declarer keeps banging out trump long after it's pointless.
+        if let t = trump {
+            let ourTrumps = hand.filter { $0.suit == t }
+            let alreadyPlayed = completedTricks.flatMap { $0.plays }.filter { $0.card.suit == t }.count
+            let couldBeOutstanding = (13 - alreadyPlayed - ourTrumps.count) > 0
+            if couldBeOutstanding, let trumpCard = ourTrumps.max(by: { $0.rank < $1.rank }) {
+                return trumpCard
+            }
         }
 
         // Lead from longest established suit

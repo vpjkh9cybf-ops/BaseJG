@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-08-14 13:00 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 struct CardView: View {
@@ -6,9 +6,6 @@ struct CardView: View {
     let card: Card
     var isHighlighted: Bool = false
     var isSmall: Bool = false
-    var isMedium: Bool = false
-    var wideHand: Bool = false
-    var isCompact: Bool = false   // Compact trick area (when E/W dummy shown in center)
     /// Overrides every preset. Width and all fonts scale from it, so a caller
     /// that knows how much room it has can hand the card an exact height.
     var explicitHeight: CGFloat? = nil
@@ -19,18 +16,12 @@ struct CardView: View {
     private var height: CGFloat {
         if let h = explicitHeight { return h }
         if isSmall   { return 50 }
-        if isMedium  { return 84 }
-        if isCompact { return 90 }
-        if wideHand  { return 180 }
         return 170
     }
 
     private var width: CGFloat {
         if explicitHeight != nil { return height * CardView.aspect }
         if isSmall   { return 34 }
-        if isMedium  { return 60 }
-        if isCompact { return 60 }
-        if wideHand  { return 86 }
         return 80
     }
 

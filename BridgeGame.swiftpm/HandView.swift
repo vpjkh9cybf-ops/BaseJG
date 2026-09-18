@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-08-14 13:00 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 struct HandView: View {
@@ -7,7 +7,6 @@ struct HandView: View {
     let faceDown: Bool
     let isSmall: Bool
     var isWide: Bool = false
-    var isMedium: Bool = false
     /// Height of the horizontal fan used by South / a wide North.
     var wideHeight: CGFloat = 180
     /// Total row length for a face-down hand; cards squeeze together to fit it.
@@ -112,19 +111,19 @@ struct HandView: View {
                         .font(isSmall ? .caption : .callout)
                         .frame(width: isSmall ? 14 : 18, alignment: .leading)
 
-                    HStack(spacing: isSmall ? -4 : isMedium ? -10 : -6) {
+                    HStack(spacing: isSmall ? -4 : -6) {
                         ForEach(suitCards) { card in
                             let isLegal = legalCards.contains(card)
                             if onTap != nil {
                                 Button {
                                     onTap?(card)
                                 } label: {
-                                    CardView(card: card, isHighlighted: isLegal, isSmall: isSmall, isMedium: isMedium)
+                                    CardView(card: card, isHighlighted: isLegal, isSmall: isSmall)
                                 }
                                 .disabled(!isLegal)
                                 .opacity(isLegal || legalCards.isEmpty ? 1.0 : 0.55)
                             } else {
-                                CardView(card: card, isSmall: isSmall, isMedium: isMedium)
+                                CardView(card: card, isSmall: isSmall)
                             }
                         }
                     }

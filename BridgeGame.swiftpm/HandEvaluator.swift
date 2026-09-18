@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-06-07 03:07 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 struct HandEvaluation {
@@ -13,12 +13,6 @@ struct HandEvaluation {
         return d == [4,3,3,3] || d == [4,4,3,2] || d == [5,3,3,2]
     }
 
-    var isSemiBalanced: Bool {
-        if isBalanced { return true }
-        let d = distribution
-        return d == [5,4,2,2] || d == [6,3,2,2]
-    }
-
     func length(_ suit: Suit) -> Int { lengths[suit] ?? 0 }
 
     var longestSuit: Suit {
@@ -26,14 +20,6 @@ struct HandEvaluation {
     }
 
     var longestLength: Int { distribution.first ?? 0 }
-
-    var fiveCardMajors: [Suit] {
-        [.spades, .hearts].filter { length($0) >= 5 }
-    }
-
-    var fourCardMajors: [Suit] {
-        [.spades, .hearts].filter { length($0) >= 4 }
-    }
 
     // Shortness points (for suit contracts)
     var shortPoints: Int {
@@ -57,13 +43,14 @@ struct HandEvaluation {
         return suitCards.reduce(0) { $0 + $1.rank.hcp }
     }
 
-    // Is a suit "good" for opening leads / overcalls
+    // Is a suit "good" for opening leads / overcalls — two of the top three
+    // honors (A, K, Q), matching the "disciplined" standard partnerships quote.
     func isSolidOrSemi(_ suit: Suit, in cards: [Card]) -> Bool {
         let suitCards = cards.filter { $0.suit == suit }
         guard suitCards.count >= 4 else { return false }
-        let ranks = suitCards.map { $0.rank }.sorted(by: >)
-        // Has AKQ, AKJ, AQJ, KQJ, etc.
-        return suitQuality(suit, in: cards) >= 5
+        let topThree: Set<Rank> = [.ace, .king, .queen]
+        let honorsHeld = suitCards.filter { topThree.contains($0.rank) }.count
+        return honorsHeld >= 2
     }
 }
 

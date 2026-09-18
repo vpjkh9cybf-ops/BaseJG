@@ -1,4 +1,4 @@
-// Conventional Wisdom — modified 2026-08-14 13:00 UTC
+// Conventional Wisdom — modified 2026-09-18 14:07 UTC
 import SwiftUI
 
 struct TrickAreaView: View {
@@ -56,54 +56,5 @@ struct TrickAreaView: View {
                 .stroke(Color.gray.opacity(0.2), lineWidth: 1)
                 .frame(width: slotW, height: slotH)
         }
-    }
-}
-
-struct ScoreTickerView: View {
-    let nsTricks: Int
-    let ewTricks: Int
-    let total: Int
-    let contract: Contract?
-
-    var body: some View {
-        VStack(spacing: 4) {
-            if let c = contract {
-                Text(c.display)
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                Text("by \(c.declarer.name)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Divider()
-
-                HStack(spacing: 16) {
-                    VStack {
-                        Text("NS")
-                            .font(.caption.bold())
-                        Text("\(nsTricks)")
-                            .font(.title3.bold())
-                            .foregroundColor(c.declarer.isNorthSouth ? .green : .primary)
-                    }
-                    VStack {
-                        Text("EW")
-                            .font(.caption.bold())
-                        Text("\(ewTricks)")
-                            .font(.title3.bold())
-                            .foregroundColor(!c.declarer.isNorthSouth ? .green : .primary)
-                    }
-                }
-
-                Text("Need \(c.tricksRequired)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                Text("Bidding…")
-                    .foregroundColor(.secondary)
-                    .font(.caption)
-            }
-        }
-        .padding(8)
-        .frame(minWidth: 80)
     }
 }
