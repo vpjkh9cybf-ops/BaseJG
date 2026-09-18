@@ -1,4 +1,4 @@
-// BRIDGE APP — Built 2026-06-07
+// Conventional Wisdom — modified 2026-08-14 13:21 UTC
 import SwiftUI
 
 // Auction context helpers

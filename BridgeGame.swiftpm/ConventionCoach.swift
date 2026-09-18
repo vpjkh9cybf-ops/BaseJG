@@ -1,4 +1,4 @@
-// BRIDGE APP — Built 2026-06-07
+// Conventional Wisdom — modified 2026-06-27 15:12 UTC
 import Foundation
 
 // MARK: - Analysis result
