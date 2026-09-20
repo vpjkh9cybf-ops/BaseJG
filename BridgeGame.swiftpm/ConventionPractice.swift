@@ -1,10 +1,9 @@
-// Conventional Wisdom — modified 2026-09-18 14:07 UTC
+// Conventional Wisdom — modified 2026-09-20 18:31 UTC
 import SwiftUI
 
 enum PracticeConvention: String, CaseIterable, Identifiable {
     case stayman           = "Stayman"
-    case jacobyToHearts    = "Jacoby Transfer (→ ♥)"
-    case jacobyToSpades    = "Jacoby Transfer (→ ♠)"
+    case jacobyTransfer    = "Jacoby Transfer"
     case jacoby2NT         = "Jacoby 2NT"
     case weakTwo           = "Weak Two Opening"
     case twoOverOne        = "2/1 Game Force"
@@ -15,14 +14,14 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
     case unusual2NT        = "Unusual 2NT"
     case invertedMinorRaise = "Inverted Minor Raise"
     case weakTwoResponse   = "Weak Two Response"
+    case xyz               = "XYZ (Two-Way New Minor)"
 
     var id: String { rawValue }
 
     var subtitle: String {
         switch self {
         case .stayman:        return "Bid 2♣ after 1NT to find a 4-card major fit (8+ HCP)"
-        case .jacobyToHearts: return "Bid 2♦ after 1NT to transfer partner to hearts (5+ ♥)"
-        case .jacobyToSpades: return "Bid 2♥ after 1NT to transfer partner to spades (5+ ♠)"
+        case .jacobyTransfer: return "Transfer partner to your 5+ card major after 1NT — 2♦ shows hearts, 2♥ shows spades"
         case .jacoby2NT:      return "Bid 2NT after partner's 1M with 4+ fit and 13+ HCP — game force"
         case .weakTwo:        return "Open 2♥ or 2♠ with 5-10 HCP and a good 6-card suit"
         case .twoOverOne:     return "Bid a new suit at the 2-level after partner's 1M — game force (13+ HCP)"
@@ -33,6 +32,7 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
         case .unusual2NT:     return "Bid 2NT over an opposing major opening with 5-5 in the minors (6-11 HCP) — not a notrump hand"
         case .invertedMinorRaise: return "Raise partner's 1♦ opening to 2♦ with 5+ support and 10-12 HCP — forcing under Inverted Minors"
         case .weakTwoResponse:    return "Ask with 2NT after partner's weak two — 14+ HCP with no fit, opener describes suit and strength"
+        case .xyz: return "After 1-of-a-minor, a 1-level major response, and opener's 1-level rebid, relay with 2♣ (invitational) or 2♦ (game force)"
         }
     }
 
@@ -50,7 +50,7 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
     func northQualifies(_ north: [Card]) -> Bool {
         let e = HandEvaluator.evaluate(north)
         switch self {
-        case .stayman, .jacobyToHearts, .jacobyToSpades:
+        case .stayman, .jacobyTransfer:
             return e.hcp >= 15 && e.hcp <= 17 && e.isBalanced
         case .jacoby2NT, .twoOverOne, .splinter:
             guard e.hcp >= 12 && e.hcp <= 21 else { return false }
@@ -73,6 +73,12 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
         case .weakTwoResponse:
             return (e.hcp >= 6 && e.hcp <= 10) &&
                    (e.length(.hearts) >= 6 || e.length(.spades) >= 6)
+        case .xyz:
+            // Force a 1♣ opening with no fit for whichever major South picks,
+            // so the auction reliably reaches a one-level rebid from North.
+            guard e.hcp >= 12 && e.hcp <= 14 else { return false }
+            guard e.length(.spades) < 4 && e.length(.hearts) < 4 else { return false }
+            return e.length(.clubs) > e.length(.diamonds)
         }
     }
 
@@ -116,6 +122,17 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
             guard ee.hcp >= 10 && ee.hcp <= 17 else { return false }
             return Suit.allCases.contains { ee.length($0) >= 5 }
 
+        case .xyz:
+            // East passes twice (over the opening and over the 1NT rebid) and
+            // West passes once — keep both hands well under any bid, since
+            // East in particular gets a second look after North's 1NT rebid.
+            let ee = HandEvaluator.evaluate(east)
+            let we = HandEvaluator.evaluate(west)
+            guard ee.hcp <= 7 else { return false }
+            guard we.hcp <= 11 else { return false }
+            if we.hcp >= 8 && Suit.allCases.contains(where: { we.length($0) >= 6 }) { return false }
+            return true
+
         default:
             let ee = HandEvaluator.evaluate(east)
             guard ee.hcp <= 11 else { return false }
@@ -134,10 +151,8 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
         switch self {
         case .stayman:
             return se.hcp >= 8 && (se.length(.spades) >= 4 || se.length(.hearts) >= 4)
-        case .jacobyToHearts:
-            return se.length(.hearts) >= 5
-        case .jacobyToSpades:
-            return se.length(.spades) >= 5
+        case .jacobyTransfer:
+            return se.length(.hearts) >= 5 || se.length(.spades) >= 5
         case .jacoby2NT:
             let northMajor: Suit = ne.length(.spades) >= 5 ? .spades : .hearts
             return se.length(northMajor) >= 4 && se.hcp >= 13
@@ -177,6 +192,9 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
             guard se.hcp >= 14 && se.hcp <= 17 else { return false }
             let noNaturalSuit = Suit.allCases.allSatisfy { $0 == northMajor || se.length($0) < 5 }
             return noNaturalSuit
+        case .xyz:
+            return se.hcp >= 11 && se.hcp <= 16 &&
+                   (se.length(.hearts) >= 4 || se.length(.spades) >= 4)
         }
     }
 
@@ -187,18 +205,27 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
 
         switch self {
         // ── 1NT opening sequences ─────────────────────────────────────────────
-        case .stayman, .jacobyToHearts, .jacobyToSpades:
+        case .stayman:
             guard auction.count == 2,
                   auction[0].seat == .north,
                   auction[0].bid  == .contract(.one, .notrump),
                   auction[1].seat == .east,
                   auction[1].bid  == .pass else { return nil }
-            switch self {
-            case .stayman:        return .contract(.two, .clubs)
-            case .jacobyToHearts: return .contract(.two, .diamonds)
-            case .jacobyToSpades: return .contract(.two, .hearts)
-            default: return nil
+            return .contract(.two, .clubs)
+
+        case .jacobyTransfer:
+            guard auction.count == 2,
+                  auction[0].seat == .north,
+                  auction[0].bid  == .contract(.one, .notrump),
+                  auction[1].seat == .east,
+                  auction[1].bid  == .pass else { return nil }
+            if se.length(.spades) >= 5 && se.length(.spades) >= se.length(.hearts) {
+                return .contract(.two, .hearts)     // transfer to spades
             }
+            if se.length(.hearts) >= 5 {
+                return .contract(.two, .diamonds)   // transfer to hearts
+            }
+            return nil
 
         // ── Jacoby 2NT ────────────────────────────────────────────────────────
         case .jacoby2NT:
@@ -329,6 +356,26 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
                   Suit.allCases.allSatisfy({ $0 == northSuit || se.length($0) < 5 })
             else { return nil }
             return .contract(.two, .notrump)
+
+        // ── XYZ (Two-Way New Minor) ──────────────────────────────────────────
+        case .xyz:
+            guard auction.count == 6,
+                  auction[0].seat == .north,
+                  auction[0].bid  == .contract(.one, .clubs),
+                  auction[1].seat == .east,
+                  auction[1].bid  == .pass,
+                  auction[2].seat == .south,
+                  auction[2].bid.level == .one,
+                  auction[2].bid.strain?.isMajor == true,
+                  auction[3].seat == .west,
+                  auction[3].bid  == .pass,
+                  auction[4].seat == .north,
+                  auction[4].bid  == .contract(.one, .notrump),
+                  auction[5].seat == .east,
+                  auction[5].bid  == .pass,
+                  se.hcp >= 11 && se.hcp <= 16
+            else { return nil }
+            return se.hcp >= 13 ? .contract(.two, .diamonds) : .contract(.two, .clubs)
         }
     }
 
@@ -343,10 +390,10 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
                 .joined(separator: " and ")
             return "Bid 2♣ (Stayman) with \(se.hcp) HCP and 4-card \(majors). Stayman asks partner to name a 4-card major so you can find an 8-card fit."
 
-        case .jacobyToHearts:
-            return "Bid 2♦ (Jacoby Transfer → ♥) with \(se.length(.hearts)) hearts. Partner will bid 2♥, placing the strong hand as declarer and keeping your hand hidden."
-
-        case .jacobyToSpades:
+        case .jacobyTransfer:
+            if expected == .contract(.two, .diamonds) {
+                return "Bid 2♦ (Jacoby Transfer → ♥) with \(se.length(.hearts)) hearts. Partner will bid 2♥, placing the strong hand as declarer and keeping your hand hidden."
+            }
             return "Bid 2♥ (Jacoby Transfer → ♠) with \(se.length(.spades)) spades. Partner will bid 2♠, then you describe your hand (pass, invite, or bid game)."
 
         case .jacoby2NT:
@@ -382,6 +429,10 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
 
         case .weakTwoResponse:
             return "Bid 2NT with \(se.hcp) HCP and no fit for partner's weak two. 2NT here is the ask, not a notrump hand — it asks opener to describe their hand (suit quality and overall strength, or an outside feature, per your agreement)."
+
+        case .xyz:
+            let relay = expected == .contract(.two, .diamonds) ? "2♦" : "2♣"
+            return "Bid \(relay) (XYZ) with \(se.hcp) HCP after partner's one-level rebid. Playing XYZ, 2♣ is a weak/invitational relay and 2♦ is a game-forcing relay — both simply ask opener to describe further rather than committing the partnership to a strain yet."
         }
     }
 
@@ -389,8 +440,12 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
     func hintText(southHand: [Card], auction: [AuctionEntry]) -> String {
         switch self {
         case .stayman:        return "💡 You have a 4-card major — consider Stayman (2♣)"
-        case .jacobyToHearts: return "💡 Use Jacoby Transfer: bid 2♦ to show 5+ hearts"
-        case .jacobyToSpades: return "💡 Use Jacoby Transfer: bid 2♥ to show 5+ spades"
+        case .jacobyTransfer:
+            let se = HandEvaluator.evaluate(southHand)
+            if se.length(.spades) >= 5 && se.length(.spades) >= se.length(.hearts) {
+                return "💡 Use Jacoby Transfer: bid 2♥ to show 5+ spades"
+            }
+            return "💡 Use Jacoby Transfer: bid 2♦ to show 5+ hearts"
         case .jacoby2NT:
             let major = auction.first?.bid.strain?.display ?? "partner's major"
             return "💡 You have 4+ \(major) and 13+ HCP — try Jacoby 2NT"
@@ -403,6 +458,7 @@ enum PracticeConvention: String, CaseIterable, Identifiable {
         case .unusual2NT:     return "💡 5-5 in the minors after their major opening — consider the Unusual 2NT"
         case .invertedMinorRaise: return "💡 5+ card support and 10+ HCP — with Inverted Minors, raise to 2 of partner's minor (forcing)"
         case .weakTwoResponse:    return "💡 14+ HCP with no fit — 2NT asks opener to describe the weak two further"
+        case .xyz:                return "💡 After a one-level rebid, XYZ relays with 2♣ (invitational) or 2♦ (game force) — don't bid naturally yet"
         }
     }
 }
